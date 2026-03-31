@@ -1,0 +1,40 @@
+# 🎧 NeuroAmp DSP
+
+> Professional DSP + Spatial Audio Engine for Android
+
+---
+
+## 🚀 Features
+- 🎚 Parametric Equalizer (multi-band)
+- 🔊 FIR Convolution Engine
+- 🌌 Spatial Audio + Head Tracking
+- 🧠 Adaptive AI Sound Tuning
+- 🚗 Car Audio Optimization (India-focused)
+
+---
+
+## 📱 Supported Platforms
+- Android phones
+- Android head units
+- Android TV (experimental)
+
+---
+
+## 🧠 Architecture
+
+Flutter UI → Kotlin Bridge → C++ DSP Engine → Oboe Audio
+
+---
+
+## ⚙️ Build Instructions
+
+### Requirements
+- Flutter SDK
+- Android Studio
+- NDK installed
+
+### Run
+```bash
+cd app
+flutter pub get
+flutter run
