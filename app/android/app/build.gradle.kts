@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.io.File
 
 plugins {
     id("com.android.application")
@@ -12,6 +13,12 @@ val keyPropertiesFile = rootProject.file("key.properties")
 if (keyPropertiesFile.exists()) {
     keyProperties.load(keyPropertiesFile.inputStream())
 }
+
+// Support CI/CD signing from environment variables
+val ciKeystore = System.getenv("NEUROAMP_KEYSTORE_BASE64")
+val ciKeyAlias = System.getenv("NEUROAMP_KEY_ALIAS")
+val ciKeyPassword = System.getenv("NEUROAMP_KEY_PASSWORD")
+val ciStorePassword = System.getenv("NEUROAMP_KEYSTORE_PASSWORD")
 
 android {
     namespace = "com.neuroamp.app"
@@ -29,8 +36,6 @@ android {
 
     defaultConfig {
         applicationId = "com.neuroamp.app"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -51,7 +56,17 @@ android {
 
     signingConfigs {
         create("release") {
-            if (keyPropertiesFile.exists()) {
+            if (ciKeystore != null) {
+                // CI/CD environment: decode keystore from base64
+                val keystoreFile = File("${buildDir}/ci.keystore")
+                val keystoreBytes = android.util.Base64.decode(ciKeystore, android.util.Base64.DEFAULT)
+                keystoreFile.writeBytes(keystoreBytes)
+                storeFile = keystoreFile
+                storePassword = ciStorePassword
+                keyAlias = ciKeyAlias
+                keyPassword = ciKeyPassword
+            } else if (keyPropertiesFile.exists()) {
+                // Local development: read from key.properties
                 keyAlias = keyProperties["keyAlias"] as String
                 keyPassword = keyProperties["keyPassword"] as String
                 storeFile = file(keyProperties["storeFile"] as String)
@@ -62,15 +77,24 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (keyPropertiesFile.exists()) {
+            signingConfig = if (ciKeystore != null || keyPropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")
             }
+            minifyEnabled = true
+            shrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+    }
+
+    bundle {
+        // Enable dynamic feature module support for Play Store AAB
+        enableSplit = true
     }
 }
 
 flutter {
     source = "../.."
 }
+

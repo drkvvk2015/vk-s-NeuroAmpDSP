@@ -1,0 +1,101 @@
+name: Build & Release to Play Store
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'release/v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Decode keystore from secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.NEUROAMP_KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p android/keystore
+          echo "$KEYSTORE_BASE64" | base64 -d > android/keystore/neuroamp-release.jks
+
+      - name: Create key.properties for signing
+        env:
+          KEY_ALIAS: ${{ secrets.NEUROAMP_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.NEUROAMP_KEY_PASSWORD }}
+          KEYSTORE_PASSWORD: ${{ secrets.NEUROAMP_KEYSTORE_PASSWORD }}
+        run: |
+          cat > android/key.properties << EOF
+          storeFile=keystore/neuroamp-release.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
+      - name: Build AAB for Play Store
+        env:
+          NEUROAMP_KEYSTORE_BASE64: ${{ secrets.NEUROAMP_KEYSTORE_BASE64 }}
+          NEUROAMP_KEY_ALIAS: ${{ secrets.NEUROAMP_KEY_ALIAS }}
+          NEUROAMP_KEY_PASSWORD: ${{ secrets.NEUROAMP_KEY_PASSWORD }}
+          NEUROAMP_KEYSTORE_PASSWORD: ${{ secrets.NEUROAMP_KEYSTORE_PASSWORD }}
+        run: |
+          flutter build appbundle \
+            --release \
+            --dart-define=APP_FLAVOR=prod \
+            --dart-define=TELEMETRY_KEY=${{ secrets.TELEMETRY_KEY }}
+
+      - name: Upload AAB to Play Store
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAYSTORE_SERVICE_ACCOUNT_JSON }}
+          packageName: com.neuroamp.app
+          releaseFiles: 'app/build/app/outputs/bundle/release/app-release.aab'
+          track: internal
+          status: draft
+
+      - name: Create Release Note
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: NeuroAmp DSP Release ${{ github.ref }}
+          body: |
+            ## NeuroAmp DSP Release
+            
+            Build: ${{ github.sha }}
+            
+            AAB uploaded to Play Store internal testing track (draft status).
+            
+            ### Notable features:
+            - Native DSP JNI processing
+            - Android sensor head-tracking integration
+            - Adaptive tuning + peak limiting
+            
+            For more details, see [README.md](README.md)
+          draft: false
+          prerelease: false
+
+      - name: Cleanup sensitive files
+        if: always()
+        run: |
+          rm -f android/key.properties
+          rm -f android/keystore/neuroamp-release.jks

@@ -72,9 +72,21 @@ If `key.properties` is missing, the project falls back to debug signing to prese
 ## CI/CD
 - `flutter-ci.yml`: analyze + unit/widget tests on push and PR
 - `android-release.yml`: builds release APK on tags (`v*`) or manual workflow dispatch
+- `playstore-release.yml`: builds signed AAB and uploads to Google Play on tag `release/v*`
+
+## Play Store Release Pipeline
+
+For production deployment to Google Play Store:
+1. See [RELEASE_SETUP.md](RELEASE_SETUP.md) for complete setup instructions
+2. Generate release keystore and configure GitHub Secrets
+3. Create Google Play service account with API access
+4. Push a tag: `git tag release/v1.0.0 && git push origin release/v1.0.0`
+5. Workflow automatically builds signed AAB and uploads to internal testing track
+6. Review and promote in Play Store Console
 
 ## Recommended next steps
 1. Replace DSP JNI stub with real FIR/PEQ processing pipeline.
 2. Add Kotlin service for continuous head-tracking updates and smoothing filters.
 3. Add instrumentation (Crashlytics/App Insights/Sentry) and performance metrics.
 4. Add integration tests for method-channel behavior and audio preset migration.
+5. Set up Play Store beta and production release tracks.
