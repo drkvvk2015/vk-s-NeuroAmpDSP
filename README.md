@@ -1,12 +1,12 @@
 # NeuroAmp DSP
 
-Production-ready mobile DSP controller with Flutter UI, Android sensor integration, and native DSP runtime stubs.
+Production-ready mobile DSP controller with Flutter UI, Android sensor integration, and a native real-time DSP runtime.
 
 ## Production features implemented
 - Advanced Flutter DSP control console (EQ, limiter, spatial width, bass boost)
 - AI adaptive tuning heuristics for road-noise and speed compensation
-- Head-tracking integration through Android sensor method channel
-- Native DSP bridge endpoint returning engine version from C++ JNI layer
+- Head-tracking integration through Android sensor method channel with smoothing
+- Native DSP bridge with JNI-backed initialization, frame processing, and release
 - Profile persistence, structured logging, and global error capture
 - Environment flavors (`dev`, `staging`, `prod`) using `--dart-define`
 - CI pipelines for lint/test and Android release artifact generation
@@ -68,6 +68,9 @@ If `key.properties` is missing, the project falls back to debug signing to prese
 ## Native bridge methods
 - `getHeadTrackingYaw`: returns device yaw from `TYPE_ROTATION_VECTOR` sensor
 - `getDspEngineVersion`: returns JNI native runtime version string
+- `initializeDsp`: initializes native DSP engine with sample rate
+- `processAudioFrame`: processes frame data through native DSP chain
+- `releaseDsp`: releases native DSP resources
 
 ## CI/CD
 - `flutter-ci.yml`: analyze + unit/widget tests on push and PR
@@ -84,9 +87,13 @@ For production deployment to Google Play Store:
 5. Workflow automatically builds signed AAB and uploads to internal testing track
 6. Review and promote in Play Store Console
 
-## Recommended next steps
-1. Replace DSP JNI stub with real FIR/PEQ processing pipeline.
-2. Add Kotlin service for continuous head-tracking updates and smoothing filters.
-3. Add instrumentation (Crashlytics/App Insights/Sentry) and performance metrics.
-4. Add integration tests for method-channel behavior and audio preset migration.
-5. Set up Play Store beta and production release tracks.
+## Completed roadmap items
+1. Replaced DSP JNI stubs with a real-time native DSP processing chain.
+2. Added head-tracking smoothing in the Flutter application service layer.
+3. Added tests for method-channel behavior and profile migration decode paths.
+4. Set up Play Store release automation with signed AAB publishing workflow.
+
+## Remaining optional enhancements
+1. Add runtime observability (Crashlytics/App Insights/Sentry) and DSP performance metrics.
+2. Add platform-level continuous head-tracking stream service in Kotlin when needed.
+3. Expand integration test matrix with hardware-in-the-loop audio validation.

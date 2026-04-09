@@ -1,0 +1,79 @@
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:neuroamp_app/core/platform/native_audio_bridge.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  const channel = MethodChannel('com.neuroamp/dsp');
+  final bridge = NativeAudioBridge(channel: channel);
+
+  tearDown(() async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
+  });
+
+  test('getHeadTrackingYawDegrees returns method result', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getHeadTrackingYaw') {
+        return 12.5;
+      }
+      return null;
+    });
+
+    final yaw = await bridge.getHeadTrackingYawDegrees();
+    expect(yaw, 12.5);
+  });
+
+  test('getDspEngineVersion falls back to unknown on null', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getDspEngineVersion') {
+        return null;
+      }
+      return null;
+    });
+
+    final version = await bridge.getDspEngineVersion();
+    expect(version, 'unknown');
+  });
+
+  test('initializeDsp returns false on channel exception', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      throw PlatformException(code: 'error');
+    });
+
+    final ok = await bridge.initializeDsp(48000);
+    expect(ok, isFalse);
+  });
+
+  test('processAudioFrame sends samples and returns bool', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'processAudioFrame');
+      final args = call.arguments as Map<dynamic, dynamic>;
+      final samples = args['samples'] as List<dynamic>;
+      expect(samples.length, 3);
+      return true;
+    });
+
+    final ok = await bridge.processAudioFrame([0.1, -0.2, 0.3]);
+    expect(ok, isTrue);
+  });
+
+  test('releaseDsp returns false when native returns null', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'releaseDsp') {
+        return null;
+      }
+      return null;
+    });
+
+    final ok = await bridge.releaseDsp();
+    expect(ok, isFalse);
+  });
+}

@@ -101,7 +101,7 @@ class AudioController extends StateNotifier<AsyncValue<DspProfile>> {
   }
 
   Future<void> syncHeadTrackingFromDevice() async {
-    final yaw = await _headTrackingService.readYawDegrees();
+    final yaw = await _headTrackingService.readSmoothedYawDegrees();
     if (yaw == null) {
       _logger.warning('No head-tracking yaw available from native bridge');
       return;

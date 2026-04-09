@@ -81,17 +81,29 @@ class DspProfile {
 
   static DspProfile decode(String raw) {
     final json = jsonDecode(raw) as Map<String, dynamic>;
-    return DspProfile(
-      name: json['name'] as String,
-      eqBands: (json['eqBands'] as List<dynamic>)
+    final defaults = DspProfile.defaultProfile();
+
+    final rawBands = json['eqBands'];
+    final eqBands = rawBands is List<dynamic>
+      ? rawBands
           .map((x) => EqBand.fromJson(x as Map<String, dynamic>))
-          .toList(growable: false),
-      spatialWidth: (json['spatialWidth'] as num).toDouble(),
-      bassBoost: (json['bassBoost'] as num).toDouble(),
-      convolverEnabled: json['convolverEnabled'] as bool,
-      aiAdaptiveEnabled: json['aiAdaptiveEnabled'] as bool,
-      headTrackingEnabled: json['headTrackingEnabled'] as bool,
-      peakLimiterDb: (json['peakLimiterDb'] as num).toDouble(),
+          .toList(growable: false)
+      : defaults.eqBands;
+
+    return DspProfile(
+      name: json['name'] as String? ?? defaults.name,
+      eqBands: eqBands,
+      spatialWidth:
+        (json['spatialWidth'] as num?)?.toDouble() ?? defaults.spatialWidth,
+      bassBoost: (json['bassBoost'] as num?)?.toDouble() ?? defaults.bassBoost,
+      convolverEnabled:
+        json['convolverEnabled'] as bool? ?? defaults.convolverEnabled,
+      aiAdaptiveEnabled:
+        json['aiAdaptiveEnabled'] as bool? ?? defaults.aiAdaptiveEnabled,
+      headTrackingEnabled:
+        json['headTrackingEnabled'] as bool? ?? defaults.headTrackingEnabled,
+      peakLimiterDb:
+        (json['peakLimiterDb'] as num?)?.toDouble() ?? defaults.peakLimiterDb,
     );
   }
 }
