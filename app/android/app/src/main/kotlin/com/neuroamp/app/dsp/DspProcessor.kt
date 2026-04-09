@@ -40,14 +40,30 @@ class DspProcessor {
         }
     }
 
-    fun initialize(sampleRate: Int): Boolean = initializeDspEngine(sampleRate)
+    fun initialize(sampleRate: Int): Boolean {
+        return try {
+            initializeDspEngine(sampleRate)
+        } catch (_: Throwable) {
+            false
+        }
+    }
 
-    fun release(): Boolean = releaseDspEngine()
+    fun release(): Boolean {
+        return try {
+            releaseDspEngine()
+        } catch (_: Throwable) {
+            false
+        }
+    }
 
     fun processFrame(inputSamples: FloatArray, config: DspConfig): FloatArray {
         val outputSamples = FloatArray(inputSamples.size)
         val configBytes = serializeConfig(config)
-        val success = processAudioFrame(inputSamples, outputSamples, configBytes)
+        val success = try {
+            processAudioFrame(inputSamples, outputSamples, configBytes)
+        } catch (_: Throwable) {
+            false
+        }
         return if (success) outputSamples else inputSamples
     }
 

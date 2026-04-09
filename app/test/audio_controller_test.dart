@@ -30,7 +30,12 @@ class _FakeNativeAudioBridge extends NativeAudioBridge {
   int initializeCalls = 0;
   int releaseCalls = 0;
   int setConfigCalls = 0;
+  int startRealtimeCalls = 0;
+  int stopRealtimeCalls = 0;
+  int startFileCalls = 0;
+  int stopFileCalls = 0;
   Map<String, dynamic>? lastConfig;
+  List<double>? processFrameResponse;
 
   @override
   Future<bool> initializeDsp(int sampleRate) async {
@@ -48,6 +53,35 @@ class _FakeNativeAudioBridge extends NativeAudioBridge {
   Future<bool> setDspConfig(Map<String, dynamic> config) async {
     setConfigCalls++;
     lastConfig = config;
+    return true;
+  }
+
+  @override
+  Future<List<double>?> processAudioFrame(List<double> inputSamples) async {
+    return processFrameResponse ?? inputSamples;
+  }
+
+  @override
+  Future<bool> startRealtimeDspDemo() async {
+    startRealtimeCalls++;
+    return true;
+  }
+
+  @override
+  Future<bool> stopRealtimeDspDemo() async {
+    stopRealtimeCalls++;
+    return true;
+  }
+
+  @override
+  Future<bool> startFileDspPlayback(String filePath) async {
+    startFileCalls++;
+    return true;
+  }
+
+  @override
+  Future<bool> stopFileDspPlayback() async {
+    stopFileCalls++;
     return true;
   }
 }
@@ -109,5 +143,42 @@ void main() {
     controller.dispose();
 
     expect(bridge.releaseCalls, 1);
+  });
+
+  test('runDspProbe reports changed=true when output differs', () async {
+    final repo = _FakeProfileRepository(DspProfile.defaultProfile());
+    final bridge = _FakeNativeAudioBridge();
+    bridge.processFrameResponse = List<double>.filled(512, 0.0);
+    final controller = AudioController(
+      repo,
+      const AdaptiveTuningService(),
+      HeadTrackingService(bridge),
+      bridge,
+      const AppLogger(),
+    );
+
+    final result = await controller.runDspProbe();
+
+    expect(result.succeeded, isTrue);
+    expect(result.changed, isTrue);
+    expect(result.meanAbsDelta, isNotNull);
+  });
+
+  test('startFilePlayback delegates to native bridge', () async {
+    final repo = _FakeProfileRepository(DspProfile.defaultProfile());
+    final bridge = _FakeNativeAudioBridge();
+    final controller = AudioController(
+      repo,
+      const AdaptiveTuningService(),
+      HeadTrackingService(bridge),
+      bridge,
+      const AppLogger(),
+    );
+
+    await controller.initialize();
+    final started = await controller.startFilePlayback('C:/music/demo.wav');
+
+    expect(started, isTrue);
+    expect(bridge.startFileCalls, 1);
   });
 }

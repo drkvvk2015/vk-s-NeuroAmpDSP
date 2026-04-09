@@ -72,4 +72,94 @@ class NativeAudioBridge {
       return false;
     }
   }
+
+  /// Starts realtime native DSP demo playback on Android.
+  Future<bool> startRealtimeDspDemo() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('startRealtimeDspDemo');
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Stops realtime native DSP demo playback on Android.
+  Future<bool> stopRealtimeDspDemo() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('stopRealtimeDspDemo');
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Queries whether realtime DSP demo playback is currently active.
+  Future<bool> isRealtimeDspDemoRunning() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('isRealtimeDspDemoRunning');
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Starts local WAV file playback routed through native DSP.
+  Future<bool> startFileDspPlayback(String filePath) async {
+    try {
+      final result = await _channel.invokeMethod<bool>(
+        'startFileDspPlayback',
+        {'filePath': filePath},
+      );
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Stops local WAV file playback routed through native DSP.
+  Future<bool> stopFileDspPlayback() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('stopFileDspPlayback');
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Returns true when local WAV file DSP playback is active.
+  Future<bool> isFileDspPlaybackRunning() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('isFileDspPlaybackRunning');
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Sets post-DSP output amplifier gain in dB on Android (-18..+18 suggested).
+  Future<bool> setOutputGainDb(double gainDb) async {
+    try {
+      final result = await _channel.invokeMethod<bool>(
+        'setOutputGainDb',
+        {'gainDb': gainDb},
+      );
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Returns runtime playback diagnostics from Android host.
+  Future<Map<String, dynamic>?> getPlaybackStatus() async {
+    try {
+      final result = await _channel.invokeMethod<Map<dynamic, dynamic>>('getPlaybackStatus');
+      if (result == null) {
+        return null;
+      }
+
+      return result.map((key, value) => MapEntry(key.toString(), value));
+    } catch (_) {
+      return null;
+    }
+  }
 }
