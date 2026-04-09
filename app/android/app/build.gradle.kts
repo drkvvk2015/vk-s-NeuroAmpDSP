@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.File
+import java.util.Base64
 
 plugins {
     id("com.android.application")
@@ -59,7 +60,7 @@ android {
             if (ciKeystore != null) {
                 // CI/CD environment: decode keystore from base64
                 val keystoreFile = File("${buildDir}/ci.keystore")
-                val keystoreBytes = android.util.Base64.decode(ciKeystore, android.util.Base64.DEFAULT)
+                val keystoreBytes = Base64.getDecoder().decode(ciKeystore)
                 keystoreFile.writeBytes(keystoreBytes)
                 storeFile = keystoreFile
                 storePassword = ciStorePassword
@@ -82,15 +83,19 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
-            minifyEnabled = true
-            shrinkResources = true
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 
     bundle {
-        // Enable dynamic feature module support for Play Store AAB
-        enableSplit = true
+        abi {
+            enableSplit = true
+        }
+        density {
+            enableSplit = true
+        }
     }
 }
 

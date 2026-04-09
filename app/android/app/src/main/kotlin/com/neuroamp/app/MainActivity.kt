@@ -16,6 +16,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var rotationSensor: Sensor? = null
     private var yawDegrees: Double = 0.0
     private var dspProcessor: DspProcessor? = null
+    private var currentDspConfig: DspConfig = DspConfig()
 
     companion object {
         private const val CHANNEL = "com.neuroamp/dsp"
@@ -43,13 +44,28 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     "processAudioFrame" -> {
                         val samples = call.argument<List<Number>>("samples")
                         if (samples == null) {
+                            result.error("invalid_args", "Missing samples payload", null)
+                        } else {
+                            val processor = dspProcessor
+                            if (processor == null) {
+                                result.error("dsp_unavailable", "DSP processor not initialized", null)
+                                return@setMethodCallHandler
+                            }
+
+                            val floatSamples = samples.map { it.toFloat() }.toFloatArray()
+                            val processedSamples = processor.processFrame(
+                                floatSamples,
+                                currentDspConfig
+                            )
+                            result.success(processedSamples.map { it.toDouble() })
+                        }
+                    }
+                    "setDspConfig" -> {
+                        val config = call.argument<Map<String, Any?>>("config")
+                        if (config == null) {
                             result.success(false)
                         } else {
-                            val floatSamples = samples.map { it.toFloat() }.toFloatArray()
-                            val processedSamples = dspProcessor?.processFrame(
-                                floatSamples,
-                                DspConfig()
-                            ) ?: floatSamples
+                            currentDspConfig = configFromMap(config)
                             result.success(true)
                         }
                     }
@@ -95,6 +111,27 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
         // No-op.
+    }
+
+    private fun configFromMap(config: Map<String, Any?>): DspConfig {
+        val rawEqBands = config["eqBands"] as? List<*>
+        val eqBands = rawEqBands
+            ?.mapNotNull { entry ->
+                val map = entry as? Map<*, *> ?: return@mapNotNull null
+                val frequencyHz = (map["frequencyHz"] as? Number)?.toDouble() ?: return@mapNotNull null
+                val gainDb = (map["gainDb"] as? Number)?.toFloat() ?: return@mapNotNull null
+                val q = (map["q"] as? Number)?.toFloat() ?: return@mapNotNull null
+                com.neuroamp.app.dsp.EqBand(frequencyHz = frequencyHz, gainDb = gainDb, q = q)
+            }
+            ?: emptyList()
+
+        return DspConfig(
+            eqBands = eqBands,
+            bassBoostDb = (config["bassBoost"] as? Number)?.toFloat() ?: 0f,
+            spatialWidth = (config["spatialWidth"] as? Number)?.toFloat() ?: 0.25f,
+            peakLimiterDb = (config["peakLimiterDb"] as? Number)?.toFloat() ?: -1f,
+            convolverEnabled = config["convolverEnabled"] as? Boolean ?: false,
+        )
     }
 
     private external fun nativeDspVersion(): String

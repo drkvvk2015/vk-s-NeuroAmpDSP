@@ -50,17 +50,38 @@ void main() {
     expect(ok, isFalse);
   });
 
-  test('processAudioFrame sends samples and returns bool', () async {
+  test('processAudioFrame sends samples and returns processed list', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
       expect(call.method, 'processAudioFrame');
       final args = call.arguments as Map<dynamic, dynamic>;
       final samples = args['samples'] as List<dynamic>;
       expect(samples.length, 3);
+      return [0.05, -0.1, 0.2];
+    });
+
+    final processed = await bridge.processAudioFrame([0.1, -0.2, 0.3]);
+    expect(processed, isNotNull);
+    expect(processed, [0.05, -0.1, 0.2]);
+  });
+
+  test('setDspConfig sends config payload', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'setDspConfig');
+      final args = call.arguments as Map<dynamic, dynamic>;
+      final config = args['config'] as Map<dynamic, dynamic>;
+      expect(config['bassBoost'], 2.5);
       return true;
     });
 
-    final ok = await bridge.processAudioFrame([0.1, -0.2, 0.3]);
+    final ok = await bridge.setDspConfig({
+      'eqBands': const [],
+      'bassBoost': 2.5,
+      'spatialWidth': 0.4,
+      'peakLimiterDb': -2.0,
+      'convolverEnabled': false,
+    });
     expect(ok, isTrue);
   });
 

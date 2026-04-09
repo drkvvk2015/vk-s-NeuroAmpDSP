@@ -2,8 +2,10 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include <deque>
 #include <android/log.h>
 #include <cstring>
+#include <cstdint>
 
 #define TAG "NeuroAmpDSP"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -32,7 +34,8 @@ struct BiquadFilter {
 };
 
 struct LookaheadLimiter {
-    std::vector<float> buffer;
+    std::vector<float> delayBuffer;
+    std::deque<std::pair<int64_t, float>> maxQueue;
     size_t pos = 0;
     float threshold = 1.0f;
     float attackMs = 0.5f;
@@ -40,34 +43,44 @@ struct LookaheadLimiter {
     float gain = 1.0f;
     float attack_samples = 24;
     float release_samples = 4800;
+    int64_t sampleIndex = 0;
     int sampleRate = 48000;
     static const int LOOKAHEAD_SIZE = 2048;
 
     LookaheadLimiter() {
-        buffer.resize(LOOKAHEAD_SIZE, 0);
+        delayBuffer.resize(LOOKAHEAD_SIZE, 0);
     }
 
     void initialize(int sr) {
         sampleRate = sr;
-        attack_samples = (attackMs * sr) / 1000.0f;
-        release_samples = (releaseMs * sr) / 1000.0f;
-        std::fill(buffer.begin(), buffer.end(), 0.0f);
+        attack_samples = std::max(1.0f, (attackMs * sr) / 1000.0f);
+        release_samples = std::max(1.0f, (releaseMs * sr) / 1000.0f);
+        std::fill(delayBuffer.begin(), delayBuffer.end(), 0.0f);
         pos = 0;
         gain = 1.0f;
+        sampleIndex = 0;
+        maxQueue.clear();
     }
 
     float process(float x) {
-        buffer[pos] = x;
-        
-        // Find peak in lookahead window
-        float peak = 0.0f;
-        for (size_t i = 0; i < buffer.size(); ++i) {
-            peak = std::max(peak, std::abs(buffer[i]));
+        float delayedSample = delayBuffer[pos];
+        float absInput = std::abs(x);
+
+        while (!maxQueue.empty() && maxQueue.back().second <= absInput) {
+            maxQueue.pop_back();
         }
+        maxQueue.emplace_back(sampleIndex, absInput);
+
+        int64_t minValidIndex = sampleIndex - LOOKAHEAD_SIZE + 1;
+        while (!maxQueue.empty() && maxQueue.front().first < minValidIndex) {
+            maxQueue.pop_front();
+        }
+
+        float peak = maxQueue.empty() ? 0.0f : maxQueue.front().second;
 
         // Compute gain reduction
         float targetGain = peak > threshold ? threshold / (peak + 1e-8f) : 1.0f;
-        
+
         if (targetGain < gain) {
             gain += (targetGain - gain) / attack_samples;
         } else {
@@ -75,9 +88,13 @@ struct LookaheadLimiter {
         }
 
         gain = std::max(0.0f, std::min(1.0f, gain));
-        float output = buffer[pos] * gain;
-        
-        pos = (pos + 1) % buffer.size();
+
+        float output = delayedSample * gain;
+
+        delayBuffer[pos] = x;
+        pos = (pos + 1) % delayBuffer.size();
+        sampleIndex++;
+
         return output;
     }
 };
@@ -112,6 +129,30 @@ static bool g_initialized = false;
 static BiquadFilter g_eqFilters[5];
 static LookaheadLimiter g_limiter;
 static SpatialWidener g_widener;
+
+static float readFloatLE(const uint8_t* p) {
+    uint32_t bits = static_cast<uint32_t>(p[0]) |
+                    (static_cast<uint32_t>(p[1]) << 8) |
+                    (static_cast<uint32_t>(p[2]) << 16) |
+                    (static_cast<uint32_t>(p[3]) << 24);
+    float value = 0.0f;
+    std::memcpy(&value, &bits, sizeof(float));
+    return value;
+}
+
+static double readDoubleLE(const uint8_t* p) {
+    uint64_t bits = static_cast<uint64_t>(p[0]) |
+                    (static_cast<uint64_t>(p[1]) << 8) |
+                    (static_cast<uint64_t>(p[2]) << 16) |
+                    (static_cast<uint64_t>(p[3]) << 24) |
+                    (static_cast<uint64_t>(p[4]) << 32) |
+                    (static_cast<uint64_t>(p[5]) << 40) |
+                    (static_cast<uint64_t>(p[6]) << 48) |
+                    (static_cast<uint64_t>(p[7]) << 56);
+    double value = 0.0;
+    std::memcpy(&value, &bits, sizeof(double));
+    return value;
+}
 
 void computeBiquadCoefficients(BiquadFilter& filter, float centerFreqHz, float gainDb, float Q, int sampleRate) {
     if (Q < 0.1f) Q = 0.1f;
@@ -196,31 +237,30 @@ extern "C" {
         float peakLimiterDb = -1.0f;
         int numEqBands = 0;
 
-        char* cfgPtr = (char*)configBytes;
+        const uint8_t* cfgPtr = reinterpret_cast<const uint8_t*>(configBytes);
         if (configLen > 0) {
-            int version = cfgPtr[0];
-            if (version == 1 && configLen >= 14) {
+            const int version = static_cast<int>(cfgPtr[0]);
+            if (version == 1 && configLen >= 15) {
                 convolverEnabled = (cfgPtr[1] != 0);
-                memcpy(&bassBoostDb, cfgPtr + 2, sizeof(float));
-                memcpy(&spatialWidth, cfgPtr + 6, sizeof(float));
-                memcpy(&peakLimiterDb, cfgPtr + 10, sizeof(float));
-                numEqBands = std::min((int)cfgPtr[14], 5);
+                bassBoostDb = readFloatLE(cfgPtr + 2);
+                spatialWidth = readFloatLE(cfgPtr + 6);
+                peakLimiterDb = readFloatLE(cfgPtr + 10);
+                numEqBands = std::min(static_cast<int>(cfgPtr[14]), 5);
             }
         }
+
+        (void)convolverEnabled;
 
         g_widener.width = std::max(0.0f, std::min(1.0f, spatialWidth));
         g_limiter.threshold = std::pow(10.0f, peakLimiterDb / 20.0f);
 
         // Update EQ gains from config
-        float eqCenters[] = {60, 250, 1000, 4000, 12000};
         for (int i = 0; i < numEqBands && i < 5; ++i) {
-            int offset = 15 + i * 12;
-            if (offset + 12 <= configLen) {
-                double freqHz;
-                float gainDb, q;
-                memcpy(&freqHz, cfgPtr + offset, sizeof(double));
-                memcpy(&gainDb, cfgPtr + offset + 8, sizeof(float));
-                memcpy(&q, cfgPtr + offset + 10, sizeof(float));
+            const int offset = 15 + i * 16;
+            if (offset + 16 <= configLen) {
+                const double freqHz = readDoubleLE(cfgPtr + offset);
+                const float gainDb = readFloatLE(cfgPtr + offset + 8);
+                const float q = readFloatLE(cfgPtr + offset + 12);
                 computeBiquadCoefficients(g_eqFilters[i], (float)freqHz, gainDb, q, g_sampleRate);
             }
         }

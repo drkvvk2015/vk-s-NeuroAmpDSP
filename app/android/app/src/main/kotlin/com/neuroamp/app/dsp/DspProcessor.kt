@@ -1,8 +1,7 @@
 package com.neuroamp.app.dsp
 
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 data class DspConfig(
     val eqBands: List<EqBand> = emptyList(),
@@ -20,6 +19,8 @@ data class EqBand(
 
 class DspProcessor {
     companion object {
+        private const val MAX_EQ_BANDS = 5
+
         external fun processAudioFrame(
             inputSamples: FloatArray,
             outputSamples: FloatArray,
@@ -51,32 +52,24 @@ class DspProcessor {
     }
 
     private fun serializeConfig(config: DspConfig): ByteArray {
-        // Simplified serialization for demo; production would use protobuf.
-        val buffer = mutableListOf<Byte>()
-        buffer.add(1) // version
-        buffer.add(if (config.convolverEnabled) 1 else 0)
-        addFloatBytes(buffer, config.bassBoostDb)
-        addFloatBytes(buffer, config.spatialWidth)
-        addFloatBytes(buffer, config.peakLimiterDb)
-        buffer.add(config.eqBands.size.toByte())
-        config.eqBands.forEach { band ->
-            addDoubleBytes(buffer, band.frequencyHz)
-            addFloatBytes(buffer, band.gainDb)
-            addFloatBytes(buffer, band.q)
+        val eqBands = config.eqBands.take(MAX_EQ_BANDS)
+        val headerBytes = 1 + 1 + 4 + 4 + 4 + 1
+        val bytesPerBand = 8 + 4 + 4
+        val byteBuffer = ByteBuffer
+            .allocate(headerBytes + (eqBands.size * bytesPerBand))
+            .order(ByteOrder.LITTLE_ENDIAN)
+
+        byteBuffer.put(1) // version
+        byteBuffer.put(if (config.convolverEnabled) 1 else 0)
+        byteBuffer.putFloat(config.bassBoostDb)
+        byteBuffer.putFloat(config.spatialWidth)
+        byteBuffer.putFloat(config.peakLimiterDb)
+        byteBuffer.put(eqBands.size.toByte())
+        eqBands.forEach { band ->
+            byteBuffer.putDouble(band.frequencyHz)
+            byteBuffer.putFloat(band.gainDb)
+            byteBuffer.putFloat(band.q)
         }
-        return buffer.toByteArray()
-    }
-
-    private fun addFloatBytes(buffer: MutableList<Byte>, value: Float) {
-        val bits = value.toBits()
-        buffer.add((bits shr 24).toByte())
-        buffer.add((bits shr 16).toByte())
-        buffer.add((bits shr 8).toByte())
-        buffer.add(bits.toByte())
-    }
-
-    private fun addDoubleBytes(buffer: MutableList<Byte>, value: Double) {
-        val bits = value.toBits()
-        repeat(8) { i -> buffer.add((bits shr (56 - i * 8)).toByte()) }
+        return byteBuffer.array()
     }
 }

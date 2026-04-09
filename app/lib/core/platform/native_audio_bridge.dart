@@ -17,13 +17,32 @@ class NativeAudioBridge {
     return value ?? 'unknown';
   }
 
-  /// Process audio frame through native DSP engine.
-  /// Returns true if processing succeeded, false otherwise.
-  Future<bool> processAudioFrame(List<double> inputSamples) async {
+  /// Process an audio frame through native DSP engine.
+  /// Returns processed samples when successful, otherwise null.
+  Future<List<double>?> processAudioFrame(List<double> inputSamples) async {
     try {
-      final result = await _channel.invokeMethod<bool>(
+      final result = await _channel.invokeMethod<List<dynamic>>(
         'processAudioFrame',
         {'samples': inputSamples},
+      );
+      if (result == null) {
+        return null;
+      }
+
+      return result
+          .map((sample) => (sample as num).toDouble())
+          .toList(growable: false);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Pushes latest DSP configuration values to native runtime.
+  Future<bool> setDspConfig(Map<String, dynamic> config) async {
+    try {
+      final result = await _channel.invokeMethod<bool>(
+        'setDspConfig',
+        {'config': config},
       );
       return result ?? false;
     } catch (e) {

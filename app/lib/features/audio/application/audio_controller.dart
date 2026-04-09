@@ -37,8 +37,9 @@ final audioControllerProvider =
       final repo = ref.read(profileRepositoryProvider);
       final tuning = ref.read(adaptiveTuningServiceProvider);
       final tracking = ref.read(headTrackingServiceProvider);
+      final bridge = ref.read(nativeAudioBridgeProvider);
       final logger = ref.read(appLoggerProvider);
-      return AudioController(repo, tuning, tracking, logger)..initialize();
+      return AudioController(repo, tuning, tracking, bridge, logger)..initialize();
     });
 
 class AudioController extends StateNotifier<AsyncValue<DspProfile>> {
@@ -46,18 +47,26 @@ class AudioController extends StateNotifier<AsyncValue<DspProfile>> {
     this._repository,
     this._adaptiveTuningService,
     this._headTrackingService,
+    this._nativeAudioBridge,
     this._logger,
   ) : super(const AsyncValue.loading());
 
   final ProfileRepository _repository;
   final AdaptiveTuningService _adaptiveTuningService;
   final HeadTrackingService _headTrackingService;
+  final NativeAudioBridge _nativeAudioBridge;
   final AppLogger _logger;
 
   Future<void> initialize() async {
     try {
+      final initialized = await _nativeAudioBridge.initializeDsp(48000);
+      if (!initialized) {
+        _logger.warning('Native DSP initialization failed; app will continue in degraded mode');
+      }
+
       final profile = await _repository.load();
       state = AsyncValue.data(profile);
+      await _syncConfigToNative(profile);
     } catch (error, stackTrace) {
       _logger.error('Failed to initialize audio profile', error: error, stackTrace: stackTrace);
       state = AsyncValue.error(error, stackTrace);
@@ -67,6 +76,7 @@ class AudioController extends StateNotifier<AsyncValue<DspProfile>> {
   Future<void> update(DspProfile profile) async {
     state = AsyncValue.data(profile);
     await _repository.save(profile);
+    await _syncConfigToNative(profile);
   }
 
   Future<void> applyAdaptiveTuning({
@@ -107,5 +117,25 @@ class AudioController extends StateNotifier<AsyncValue<DspProfile>> {
       return;
     }
     await applyHeadTracking(yaw);
+  }
+
+  Future<void> _syncConfigToNative(DspProfile profile) async {
+    final success = await _nativeAudioBridge.setDspConfig({
+      'eqBands': profile.eqBands.map((band) => band.toJson()).toList(growable: false),
+      'bassBoost': profile.bassBoost,
+      'spatialWidth': profile.spatialWidth,
+      'peakLimiterDb': profile.peakLimiterDb,
+      'convolverEnabled': profile.convolverEnabled,
+    });
+
+    if (!success) {
+      _logger.warning('Failed to sync profile to native DSP engine');
+    }
+  }
+
+  @override
+  void dispose() {
+    _nativeAudioBridge.releaseDsp();
+    super.dispose();
   }
 }
