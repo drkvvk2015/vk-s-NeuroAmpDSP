@@ -1,106 +1,212 @@
 # NeuroAmp DSP
 
-Production-ready mobile DSP controller with Flutter UI, Android sensor integration, and a native real-time DSP runtime.
+Production-Ready Mobile Audio DSP Engine with Flutter + Native C++ Runtime
 
-## Production features implemented
-- Advanced Flutter DSP control console (EQ, limiter, spatial width, bass boost)
-- AI adaptive tuning heuristics for road-noise and speed compensation
-- Head-tracking integration through Android sensor method channel with smoothing
-- Native DSP bridge with JNI-backed initialization, frame processing, and release
-- Profile persistence, structured logging, and global error capture
-- Environment flavors (`dev`, `staging`, `prod`) using `--dart-define`
-- CI pipelines for lint/test and Android release artifact generation
-- App Insights telemetry for startup events and unhandled exception reporting in prod
+NeuroAmp DSP is a high-performance mobile audio processing system that combines a modern Flutter UI with a real-time native DSP engine. It is designed for low-latency audio enhancement, adaptive tuning, and sensor-driven spatial audio experiences.
+
+## Key Features
+
+### Advanced DSP Control Panel
+- Multi-band EQ
+- Limiter (dynamic range control)
+- Spatial width (stereo enhancement)
+- Bass boost (low-frequency shaping)
+
+### Adaptive Audio Tuning
+- Dynamic adjustments based on motion/speed signals
+- Heuristic-based noise compensation
+- Real-time parameter updates
+
+### Head Tracking Integration
+- Uses Android `TYPE_ROTATION_VECTOR` sensor
+- Smooth yaw tracking with filtering
+- Enables spatial audio responsiveness
+
+### Real-Time Native DSP Engine
+- C++ audio processing pipeline
+- JNI bridge for low-latency execution
+- Frame-based audio processing
+
+### Production-Grade Observability
+- App lifecycle telemetry (App Insights)
+- Global error capture (Flutter + Zone)
+- Safe fallback on telemetry failure
+
+### CI/CD and Deployment
+- Automated testing and linting
+- APK/AAB build pipelines
+- Play Store release automation
 
 ## Architecture
 
-Flutter UI -> Riverpod Application Layer -> MethodChannel Bridge -> Kotlin MainActivity -> C++ DSP Runtime
-
-## Repository layout
 ```text
-.
-|- app/
-|  |- lib/
-|  |  |- core/
-|  |  |- features/audio/
-|  |- android/
-|  |  |- app/src/main/kotlin/com/neuroamp/app/MainActivity.kt
-|  |  |- app/src/main/cpp/dsp_engine.cpp
-|  |- test/
-|- .github/workflows/flutter-ci.yml
-|- .github/workflows/android-release.yml
+Flutter UI
+	↓
+Riverpod State Management
+	↓
+MethodChannel Bridge
+	↓
+Kotlin (Android Layer)
+	↓
+C++ DSP Runtime (JNI)
 ```
 
-## Local setup
+## Data Flow Example
+
+User adjusts EQ ->
+State updated via Riverpod ->
+Parameters sent via MethodChannel ->
+Kotlin forwards to JNI ->
+C++ updates filter coefficients ->
+Next audio frame processed in real-time
+
+## DSP Processing Details
+- Equalizer: Multi-band biquad filters for frequency shaping
+- Limiter: Prevents clipping using dynamic gain control
+- Spatial Width: Mid/Side (M/S) stereo processing
+- Bass Boost: Low-shelf filter enhancement
+
+## Real-Time Considerations
+- Frame-based processing (low-latency pipeline)
+- Native execution to avoid UI thread blocking
+- Optimized for mobile CPU constraints
+
+## Repository Structure
+
+```text
+.
+├── app/
+│   ├── lib/
+│   │   ├── core/
+│   │   ├── features/audio/
+│   ├── android/
+│   │   ├── app/src/main/kotlin/com/neuroamp/app/MainActivity.kt
+│   │   ├── app/src/main/cpp/dsp_engine.cpp
+│   ├── test/
+├── .github/workflows/
+│   ├── flutter-ci.yml
+│   ├── android-release.yml
+│   ├── playstore-release.yml
+```
+
+## Environment Configuration
+
+Supports multiple environments using `--dart-define`:
+
+| Flavor | Purpose |
+| --- | --- |
+| dev | Local development |
+| staging | Pre-release testing |
+| prod | Production release |
+
+## Getting Started
 
 ### Prerequisites
 - Flutter SDK (stable)
 - Android SDK + NDK
 - Java 17
 
-### Run in development
+### Run (Development)
 ```bash
 cd app
 flutter pub get
 flutter run --dart-define=APP_FLAVOR=dev
 ```
 
-### Run staging
+### Run (Staging)
 ```bash
 cd app
 flutter run --release --dart-define=APP_FLAVOR=staging
 ```
 
-### Build production APK
+### Build (Production APK)
 ```bash
 cd app
-flutter build apk --release --dart-define=APP_FLAVOR=prod --dart-define=TELEMETRY_KEY=<your-key>
+flutter build apk --release \
+  --dart-define=APP_FLAVOR=prod \
+  --dart-define=TELEMETRY_KEY=<your-key>
 ```
 
-### Telemetry configuration (App Insights)
-- Telemetry is enabled only when `APP_FLAVOR=prod` and `TELEMETRY_KEY` is provided.
-- App startup lifecycle events (`app_bootstrap_start`, `app_bootstrap_complete`) are emitted.
-- Unhandled Flutter and zone errors are reported as App Insights exceptions.
-- If telemetry ingestion fails, the app continues running and logs warnings locally.
+## Telemetry (App Insights)
 
-## Android release signing
+Enabled only in production builds.
+
+Tracks:
+- `app_bootstrap_start`
+- `app_bootstrap_complete`
+- Unhandled exceptions
+
+Safe fallback:
+- App continues even if telemetry fails
+
+## Android Release Signing
 
 1. Copy `app/android/key.properties.example` to `app/android/key.properties`.
-2. Create a keystore at `app/keystore/neuroamp-release.jks` (or update `storeFile` path).
-3. Fill `storePassword`, `keyAlias`, and `keyPassword`.
-4. Build release APK.
+2. Create keystore at `app/keystore/neuroamp-release.jks`.
+3. Fill credentials in `key.properties`.
+4. Build release.
 
-If `key.properties` is missing, the project falls back to debug signing to preserve local build usability.
+Falls back to debug signing if not configured (dev-friendly).
 
-## Native bridge methods
-- `getHeadTrackingYaw`: returns device yaw from `TYPE_ROTATION_VECTOR` sensor
-- `getDspEngineVersion`: returns JNI native runtime version string
-- `initializeDsp`: initializes native DSP engine with sample rate
-- `processAudioFrame`: processes frame data through native DSP chain
-- `releaseDsp`: releases native DSP resources
+## Native Bridge API
 
-## CI/CD
-- `flutter-ci.yml`: analyze + unit/widget tests on push and PR
-- `android-release.yml`: builds release APK on tags (`v*`) or manual workflow dispatch
-- `playstore-release.yml`: builds signed AAB and uploads to Google Play on tag `release/v*`
+| Method | Description |
+| --- | --- |
+| `initializeDsp` | Initialize DSP engine |
+| `processAudioFrame` | Process audio buffer |
+| `releaseDsp` | Cleanup resources |
+| `getHeadTrackingYaw` | Sensor-based yaw |
+| `getDspEngineVersion` | Native version info |
 
-## Play Store Release Pipeline
+## CI/CD Pipelines
 
-For production deployment to Google Play Store:
-1. See [RELEASE_SETUP.md](RELEASE_SETUP.md) for complete setup instructions
-2. Generate release keystore and configure GitHub Secrets
-3. Create Google Play service account with API access
-4. Push a tag: `git tag release/v1.0.0 && git push origin release/v1.0.0`
-5. Workflow automatically builds signed AAB and uploads to internal testing track
-6. Review and promote in Play Store Console
+### `flutter-ci.yml`
+Lint + unit/widget tests
 
-## Completed roadmap items
-1. Replaced DSP JNI stubs with a real-time native DSP processing chain.
-2. Added head-tracking smoothing in the Flutter application service layer.
-3. Added tests for method-channel behavior and profile migration decode paths.
-4. Set up Play Store release automation with signed AAB publishing workflow.
+### `android-release.yml`
+Builds APK on version tags (`v*`)
 
-## Remaining optional enhancements
-1. Add runtime observability (Crashlytics/App Insights/Sentry) and DSP performance metrics.
-2. Add platform-level continuous head-tracking stream service in Kotlin when needed.
-3. Expand integration test matrix with hardware-in-the-loop audio validation.
+### `playstore-release.yml`
+- Builds signed AAB
+- Uploads to Play Store (internal testing)
+
+## Play Store Deployment
+
+```bash
+git tag release/v1.0.0
+git push origin release/v1.0.0
+```
+
+Automated:
+- Build signed AAB
+- Upload to Play Console
+- Ready for promotion
+
+## Stability and Safety
+- Graceful fallback if DSP initialization fails
+- JNI error handling prevents crashes
+- Sensor failure does not block audio processing
+
+## Roadmap
+
+### Completed
+- Real-time DSP engine (C++)
+- Head tracking integration
+- CI/CD + Play Store automation
+- Testing (method channel + decoding)
+
+### Future Enhancements
+- DSP performance metrics (CPU, latency)
+- Continuous head-tracking service (Kotlin layer)
+- Hardware-in-the-loop audio validation
+
+## Real-World Use Cases
+- In-car audio enhancement
+- Headphone spatial audio
+- Adaptive listening in noisy environments
+
+## Why This Project Stands Out
+- Combines Flutter + Native + C++ DSP
+- Real-time audio processing on mobile
+- Production-ready with CI/CD and telemetry
+- Demonstrates systems thinking + performance engineering
