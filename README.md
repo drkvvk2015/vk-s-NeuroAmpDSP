@@ -10,6 +10,7 @@ Production-ready mobile DSP controller with Flutter UI, Android sensor integrati
 - Profile persistence, structured logging, and global error capture
 - Environment flavors (`dev`, `staging`, `prod`) using `--dart-define`
 - CI pipelines for lint/test and Android release artifact generation
+- App Insights telemetry for startup events and unhandled exception reporting in prod
 
 ## Architecture
 
@@ -55,6 +56,12 @@ flutter run --release --dart-define=APP_FLAVOR=staging
 cd app
 flutter build apk --release --dart-define=APP_FLAVOR=prod --dart-define=TELEMETRY_KEY=<your-key>
 ```
+
+### Telemetry configuration (App Insights)
+- Telemetry is enabled only when `APP_FLAVOR=prod` and `TELEMETRY_KEY` is provided.
+- App startup lifecycle events (`app_bootstrap_start`, `app_bootstrap_complete`) are emitted.
+- Unhandled Flutter and zone errors are reported as App Insights exceptions.
+- If telemetry ingestion fails, the app continues running and logs warnings locally.
 
 ## Android release signing
 
