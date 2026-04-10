@@ -1,6 +1,8 @@
 package com.neuroamp.app
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -8,11 +10,15 @@ import android.hardware.SensorManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioRecord
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.AudioTrack
+import android.media.MediaRecorder
 import android.util.Log
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.neuroamp.app.dsp.DspProcessor
 import com.neuroamp.app.dsp.DspConfig
 import io.flutter.embedding.android.FlutterActivity
@@ -42,6 +48,15 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var filePlaybackThread: Thread? = null
     private var fileAudioTrack: AudioTrack? = null
     @Volatile
+    private var microphoneMonitorRunning: Boolean = false
+    private var microphoneMonitorThread: Thread? = null
+    private var microphoneAudioTrack: AudioTrack? = null
+    private var microphoneAudioRecord: AudioRecord? = null
+    @Volatile
+    private var safetyAttenuationActive: Boolean = false
+    private var feedbackFrameCounter: Int = 0
+    private var safetyRecoveryCounter: Int = 0
+    @Volatile
     private var outputGainLinear: Float = 1.0f
     @Volatile
     private var lastPlaybackError: String = "idle"
@@ -49,10 +64,12 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var lastInputRms: Float = 0.0f
     @Volatile
     private var lastOutputRms: Float = 0.0f
+    private var pendingPermissionResult: MethodChannel.Result? = null
 
     companion object {
         private const val CHANNEL = "com.neuroamp/dsp"
         private const val TAG = "NeuroAmpMainActivity"
+        private const val RECORD_AUDIO_REQUEST_CODE = 1101
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -126,6 +143,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         val success = try {
                             stopRealtimeDspDemo()
                             stopFileDspPlayback()
+                            stopMicrophoneDspMonitor()
                             dspProcessor?.release() ?: false
                         } catch (_: Throwable) {
                             false
@@ -135,6 +153,11 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     "startRealtimeDspDemo" -> result.success(startRealtimeDspDemo())
                     "stopRealtimeDspDemo" -> result.success(stopRealtimeDspDemo())
                     "isRealtimeDspDemoRunning" -> result.success(realtimeDemoRunning)
+                    "requestRecordAudioPermission" -> requestRecordAudioPermission(result)
+                    "hasRecordAudioPermission" -> result.success(hasRecordAudioPermission())
+                    "startMicrophoneDspMonitor" -> result.success(startMicrophoneDspMonitor())
+                    "stopMicrophoneDspMonitor" -> result.success(stopMicrophoneDspMonitor())
+                    "isMicrophoneDspMonitorRunning" -> result.success(microphoneMonitorRunning)
                     "setOutputGainDb" -> {
                         val gainDb = (call.argument<Number>("gainDb") ?: 0.0).toDouble().toFloat()
                         outputGainLinear = dbToLinear(gainDb.coerceIn(-18.0f, 18.0f))
@@ -145,7 +168,10 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                             mapOf(
                                 "realtimeRunning" to realtimeDemoRunning,
                                 "fileRunning" to filePlaybackRunning,
+                                "microphoneRunning" to microphoneMonitorRunning,
                                 "dspReady" to (dspProcessor != null),
+                                "hasRecordAudioPermission" to hasRecordAudioPermission(),
+                                "safetyAttenuationActive" to safetyAttenuationActive,
                                 "lastError" to lastPlaybackError,
                                 "outputGainLinear" to outputGainLinear,
                                 "inputRms" to lastInputRms,
@@ -180,12 +206,30 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         sensorManager.unregisterListener(this)
         stopRealtimeDspDemo()
         stopFileDspPlayback()
+        stopMicrophoneDspMonitor()
     }
 
     override fun onDestroy() {
         stopRealtimeDspDemo()
         stopFileDspPlayback()
+        stopMicrophoneDspMonitor()
         super.onDestroy()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        if (requestCode != RECORD_AUDIO_REQUEST_CODE) {
+            return
+        }
+
+        val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+        pendingPermissionResult?.success(granted)
+        pendingPermissionResult = null
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
@@ -249,6 +293,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
 
         stopFileDspPlayback()
+        stopMicrophoneDspMonitor()
         val sampleRate = 48000
         val frameSize = 512
         val minBuffer = AudioTrack.getMinBufferSize(
@@ -294,34 +339,34 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             val input = FloatArray(frameSize)
             val outputShort = ShortArray(frameSize)
             var sampleIndex = 0L
+            val demoFrequencies = doubleArrayOf(110.0, 146.83, 196.0, 220.0)
 
             try {
                 track.play()
                 while (realtimeDemoRunning) {
                     val localConfig = currentDspConfig
+                    val phraseIndex = ((sampleIndex / sampleRate) / 2).toInt() % demoFrequencies.size
+                    val fundamentalHz = demoFrequencies[phraseIndex]
+                    val overtoneHz = fundamentalHz * 2.0
                     for (i in 0 until frameSize) {
                         val t = sampleIndex.toDouble() / sampleRate.toDouble()
-                        val base = sin(2.0 * PI * 110.0 * t) * 0.35
-                        val harmonic = sin(2.0 * PI * 220.0 * t) * 0.2
-                        val sparkle = sin(2.0 * PI * 1760.0 * t) * 0.08
-                        input[i] = (base + harmonic + sparkle).toFloat().coerceIn(-1.0f, 1.0f)
+                        val tremolo = 0.72 + (0.28 * sin(2.0 * PI * 1.4 * t))
+                        val base = sin(2.0 * PI * fundamentalHz * t) * 0.50
+                        val overtone = sin(2.0 * PI * overtoneHz * t) * 0.22
+                        val lowSupport = sin(2.0 * PI * (fundamentalHz * 0.5) * t) * 0.10
+                        input[i] = ((base + overtone + lowSupport) * tremolo)
+                            .toFloat()
+                            .coerceIn(-1.0f, 1.0f)
                         sampleIndex++
                     }
 
-                    val processed = try {
-                        processor.processFrame(input, localConfig)
-                    } catch (e: Throwable) {
-                        Log.e(TAG, "Realtime DSP processing failed", e)
-                        input
-                    }
-
-                    for (i in 0 until frameSize) {
-                        val amplified = (processed[i] * outputGainLinear).coerceIn(-1.0f, 1.0f)
-                        val scaled = (amplified * Short.MAX_VALUE).toInt()
-                        outputShort[i] = scaled.toShort()
-                    }
-
-                    val written = track.write(outputShort, 0, outputShort.size)
+                    val written = processFrameAndWrite(
+                        processor = processor,
+                        input = input,
+                        outputShort = outputShort,
+                        track = track,
+                        label = "Realtime",
+                    )
                     if (written < 0) {
                         Log.e(TAG, "AudioTrack write failed with code: $written")
                         lastPlaybackError = "AudioTrack write failed ($written)"
@@ -394,6 +439,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
 
         stopRealtimeDspDemo()
+        stopMicrophoneDspMonitor()
 
         val wavInfo = try {
             parseWavInfo(filePath)
@@ -804,6 +850,256 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         return true
     }
 
+    private fun startMicrophoneDspMonitor(): Boolean {
+        if (microphoneMonitorRunning) {
+            return true
+        }
+
+        if (!hasRecordAudioPermission()) {
+            lastPlaybackError = "RECORD_AUDIO permission not granted"
+            return false
+        }
+
+        val processor = ensureDspProcessorReady()
+        if (processor == null) {
+            lastPlaybackError = "DSP processor unavailable"
+            return false
+        }
+
+        stopRealtimeDspDemo()
+        stopFileDspPlayback()
+
+        val sampleRate = 48000
+        val frameSize = 512
+        val minInputBuffer = AudioRecord.getMinBufferSize(
+            sampleRate,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+        )
+        val minOutputBuffer = AudioTrack.getMinBufferSize(
+            sampleRate,
+            AudioFormat.CHANNEL_OUT_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+        )
+
+        if (minInputBuffer == AudioRecord.ERROR || minInputBuffer == AudioRecord.ERROR_BAD_VALUE) {
+            lastPlaybackError = "Invalid AudioRecord min buffer size"
+            return false
+        }
+        if (minOutputBuffer == AudioTrack.ERROR || minOutputBuffer == AudioTrack.ERROR_BAD_VALUE) {
+            lastPlaybackError = "Invalid AudioTrack min buffer size"
+            return false
+        }
+
+        val recorder = AudioRecord(
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            sampleRate,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+            maxOf(minInputBuffer, frameSize * 4),
+        )
+        if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+            recorder.release()
+            lastPlaybackError = "AudioRecord initialization failed"
+            return false
+        }
+
+        val track = AudioTrack(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build(),
+            AudioFormat.Builder()
+                .setSampleRate(sampleRate)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .build(),
+            maxOf(minOutputBuffer, frameSize * 8),
+            AudioTrack.MODE_STREAM,
+            AudioManager.AUDIO_SESSION_ID_GENERATE,
+        )
+        if (track.state != AudioTrack.STATE_INITIALIZED) {
+            recorder.release()
+            track.release()
+            lastPlaybackError = "AudioTrack initialization failed"
+            return false
+        }
+
+        microphoneAudioRecord = recorder
+        microphoneAudioTrack = track
+        microphoneMonitorRunning = true
+        safetyAttenuationActive = false
+        feedbackFrameCounter = 0
+        safetyRecoveryCounter = 0
+        lastPlaybackError = "none"
+
+        microphoneMonitorThread = Thread {
+            val inputShort = ShortArray(frameSize)
+            val inputFloat = FloatArray(frameSize)
+            val outputShort = ShortArray(frameSize)
+
+            try {
+                recorder.startRecording()
+                track.play()
+
+                while (microphoneMonitorRunning) {
+                    val read = recorder.read(inputShort, 0, inputShort.size, AudioRecord.READ_BLOCKING)
+                    if (read <= 0) {
+                        lastPlaybackError = "AudioRecord read failed ($read)"
+                        break
+                    }
+
+                    for (i in 0 until read) {
+                        inputFloat[i] = (inputShort[i] / 32768.0f).coerceIn(-1.0f, 1.0f)
+                    }
+
+                    val frame = if (read == frameSize) inputFloat else inputFloat.copyOf(read)
+                    val written = processFrameAndWrite(
+                        processor = processor,
+                        input = frame,
+                        outputShort = outputShort,
+                        track = track,
+                        label = "Microphone",
+                    )
+                    maybeApplyFeedbackSafety()
+                    if (written < 0) {
+                        lastPlaybackError = "Microphone playback write failed ($written)"
+                        break
+                    }
+                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "Microphone DSP monitor crashed", e)
+                lastPlaybackError = "Microphone DSP crashed: ${e.message}"
+            } finally {
+                try {
+                    recorder.stop()
+                } catch (_: Throwable) {
+                }
+                try {
+                    track.pause()
+                    track.flush()
+                    track.stop()
+                } catch (_: Throwable) {
+                }
+            }
+        }.also {
+            it.name = "NeuroAmpMicMonitor"
+            it.start()
+        }
+
+        return true
+    }
+
+    private fun stopMicrophoneDspMonitor(): Boolean {
+        if (!microphoneMonitorRunning && microphoneMonitorThread == null && microphoneAudioTrack == null && microphoneAudioRecord == null) {
+            return true
+        }
+
+        microphoneMonitorRunning = false
+
+        try {
+            microphoneMonitorThread?.join(500)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+
+        microphoneMonitorThread = null
+
+        microphoneAudioRecord?.let { recorder ->
+            try {
+                recorder.stop()
+            } catch (_: Throwable) {
+            } finally {
+                try {
+                    recorder.release()
+                } catch (_: Throwable) {
+                }
+            }
+        }
+        microphoneAudioRecord = null
+
+        microphoneAudioTrack?.let { track ->
+            try {
+                track.pause()
+                track.flush()
+                track.stop()
+            } catch (_: Throwable) {
+            } finally {
+                try {
+                    track.release()
+                } catch (_: Throwable) {
+                }
+            }
+        }
+        microphoneAudioTrack = null
+        safetyAttenuationActive = false
+        feedbackFrameCounter = 0
+        safetyRecoveryCounter = 0
+
+        return true
+    }
+
+    private fun maybeApplyFeedbackSafety() {
+        val inRms = lastInputRms
+        val outRms = lastOutputRms
+        val likelyFeedback =
+            inRms > 0.18f && outRms > 0.22f && kotlin.math.abs(outRms - inRms) < 0.08f
+
+        feedbackFrameCounter = if (likelyFeedback) {
+            feedbackFrameCounter + 1
+        } else {
+            (feedbackFrameCounter - 1).coerceAtLeast(0)
+        }
+
+        if (feedbackFrameCounter >= 6) {
+            outputGainLinear = (outputGainLinear * 0.72f).coerceAtLeast(0.15f)
+            safetyAttenuationActive = true
+            lastPlaybackError = "Safety attenuation active (feedback protection)"
+            feedbackFrameCounter = 0
+            safetyRecoveryCounter = 0
+            return
+        }
+
+        if (!safetyAttenuationActive || likelyFeedback || outRms >= 0.12f) {
+            safetyRecoveryCounter = 0
+            return
+        }
+
+        safetyRecoveryCounter++
+        if (safetyRecoveryCounter >= 60) {
+            outputGainLinear = (outputGainLinear * 1.05f).coerceAtMost(1.0f)
+            if (outputGainLinear >= 0.98f) {
+                outputGainLinear = 1.0f
+                safetyAttenuationActive = false
+                lastPlaybackError = "none"
+            }
+            safetyRecoveryCounter = 0
+        }
+    }
+
+    private fun hasRecordAudioPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun requestRecordAudioPermission(result: MethodChannel.Result) {
+        if (hasRecordAudioPermission()) {
+            result.success(true)
+            return
+        }
+
+        if (pendingPermissionResult != null) {
+            result.error("permission_request_in_progress", "A microphone permission request is already pending", null)
+            return
+        }
+
+        pendingPermissionResult = result
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.RECORD_AUDIO),
+            RECORD_AUDIO_REQUEST_CODE,
+        )
+    }
+
     private fun parseWavInfo(filePath: String): WavInfo? {
         RandomAccessFile(filePath, "r").use { raf ->
             if (raf.length() < 44) {
@@ -982,13 +1278,16 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             val ok = processor.initialize(48000)
             if (!ok) {
                 Log.e(TAG, "ensureDspProcessorReady: initialize failed")
+                lastPlaybackError = "DSP initialize returned false"
                 null
             } else {
                 dspProcessor = processor
+                lastPlaybackError = "none"
                 processor
             }
         } catch (e: Throwable) {
             Log.e(TAG, "ensureDspProcessorReady failed", e)
+            lastPlaybackError = "${e.javaClass.simpleName}: ${e.message ?: "unknown"}"
             null
         }
     }

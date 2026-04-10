@@ -26,6 +26,8 @@ NeuroAmp DSP is a high-performance mobile audio processing system that combines 
 - C++ audio processing pipeline
 - JNI bridge for low-latency execution
 - Frame-based audio processing
+- Live microphone input -> DSP -> speaker monitoring mode (Android)
+- Local file playback through DSP (WAV/MP3/AAC decode path)
 
 ### Production-Grade Observability
 - App lifecycle telemetry (App Insights)
@@ -157,6 +159,18 @@ Falls back to debug signing if not configured (dev-friendly).
 | `releaseDsp` | Cleanup resources |
 | `getHeadTrackingYaw` | Sensor-based yaw |
 | `getDspEngineVersion` | Native version info |
+| `requestRecordAudioPermission` | Request microphone permission |
+| `hasRecordAudioPermission` | Check microphone permission state |
+| `startMicrophoneDspMonitor` | Start live mic->DSP->speaker path |
+| `stopMicrophoneDspMonitor` | Stop live mic DSP path |
+| `isMicrophoneDspMonitorRunning` | Query mic DSP running state |
+
+## Runtime Modes
+- Live Mic DSP: Processes microphone input in real-time with current DSP profile.
+- File DSP Playback: Processes selected local audio files through the DSP chain.
+- Realtime Demo DSP: Synthetic source for quick validation and profiling.
+
+Note: Android app sandbox rules do not allow this app to process system-wide audio from other apps without privileged OS-level integration.
 
 ## CI/CD Pipelines
 

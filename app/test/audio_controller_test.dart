@@ -34,8 +34,18 @@ class _FakeNativeAudioBridge extends NativeAudioBridge {
   int stopRealtimeCalls = 0;
   int startFileCalls = 0;
   int stopFileCalls = 0;
+  int startMicrophoneCalls = 0;
+  int stopMicrophoneCalls = 0;
   Map<String, dynamic>? lastConfig;
   List<double>? processFrameResponse;
+  String version = 'NeuroAmpDSP-test';
+  double? yawDegrees = 4.2;
+  Map<String, dynamic>? playbackStatus = const {
+    'realtimeRunning': false,
+    'fileRunning': false,
+    'dspReady': true,
+    'lastError': 'none',
+  };
 
   @override
   Future<bool> initializeDsp(int sampleRate) async {
@@ -62,6 +72,21 @@ class _FakeNativeAudioBridge extends NativeAudioBridge {
   }
 
   @override
+  Future<String> getDspEngineVersion() async {
+    return version;
+  }
+
+  @override
+  Future<double?> getHeadTrackingYawDegrees() async {
+    return yawDegrees;
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getPlaybackStatus() async {
+    return playbackStatus;
+  }
+
+  @override
   Future<bool> startRealtimeDspDemo() async {
     startRealtimeCalls++;
     return true;
@@ -82,6 +107,28 @@ class _FakeNativeAudioBridge extends NativeAudioBridge {
   @override
   Future<bool> stopFileDspPlayback() async {
     stopFileCalls++;
+    return true;
+  }
+
+  @override
+  Future<bool> startMicrophoneDspMonitor() async {
+    startMicrophoneCalls++;
+    return true;
+  }
+
+  @override
+  Future<bool> stopMicrophoneDspMonitor() async {
+    stopMicrophoneCalls++;
+    return true;
+  }
+
+  @override
+  Future<bool> hasRecordAudioPermission() async {
+    return true;
+  }
+
+  @override
+  Future<bool> requestRecordAudioPermission() async {
     return true;
   }
 }
@@ -180,5 +227,68 @@ void main() {
 
     expect(started, isTrue);
     expect(bridge.startFileCalls, 1);
+  });
+
+  test('startMicrophoneMonitor delegates to native bridge', () async {
+    final repo = _FakeProfileRepository(DspProfile.defaultProfile());
+    final bridge = _FakeNativeAudioBridge();
+    final controller = AudioController(
+      repo,
+      const AdaptiveTuningService(),
+      HeadTrackingService(bridge),
+      bridge,
+      const AppLogger(),
+    );
+
+    await controller.initialize();
+    final started = await controller.startMicrophoneMonitor();
+
+    expect(started, isTrue);
+    expect(bridge.startMicrophoneCalls, 1);
+  });
+
+  test('runBridgeDiagnostic reports healthy bridge when native calls succeed', () async {
+    final repo = _FakeProfileRepository(DspProfile.defaultProfile());
+    final bridge = _FakeNativeAudioBridge();
+    final controller = AudioController(
+      repo,
+      const AdaptiveTuningService(),
+      HeadTrackingService(bridge),
+      bridge,
+      const AppLogger(),
+    );
+
+    final diagnostic = await controller.runBridgeDiagnostic();
+
+    expect(diagnostic.isHealthy, isTrue);
+    expect(diagnostic.initialized, isTrue);
+    expect(diagnostic.version, 'NeuroAmpDSP-test');
+    expect(diagnostic.yawDegrees, 4.2);
+  });
+
+  test('runBridgeDiagnostic reports init and dsp readiness issues', () async {
+    final repo = _FakeProfileRepository(DspProfile.defaultProfile());
+    final bridge = _FakeNativeAudioBridge();
+    bridge.version = 'dsp-native-unavailable';
+    bridge.playbackStatus = const {
+      'realtimeRunning': false,
+      'fileRunning': false,
+      'dspReady': false,
+      'lastError': 'DSP processor unavailable',
+    };
+    final controller = AudioController(
+      repo,
+      const AdaptiveTuningService(),
+      HeadTrackingService(bridge),
+      bridge,
+      const AppLogger(),
+    );
+
+    final diagnostic = await controller.runBridgeDiagnostic();
+
+    expect(diagnostic.isHealthy, isFalse);
+    expect(diagnostic.issues, contains('DSP version unavailable'));
+    expect(diagnostic.issues, contains('Native playback status reports DSP not ready'));
+    expect(diagnostic.issues, contains('Native lastError=DSP processor unavailable'));
   });
 }

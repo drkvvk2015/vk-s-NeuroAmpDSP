@@ -126,6 +126,30 @@ Update version in `app/pubspec.yaml`:
 
 The `BUILD_NUMBER` should increment with each release.
 
+### Version Bump + Tag Commands
+
+PowerShell example (manual):
+
+```powershell
+Set-Location "e:/NeuAMP/vk-s-NeuroAmpDSP"
+
+# Example: bump to 1.0.1+2
+(Get-Content "app/pubspec.yaml") -replace '^version:\s*.*$', 'version: 1.0.1+2' | Set-Content "app/pubspec.yaml"
+
+git add app/pubspec.yaml
+git commit -m "chore(release): bump version to 1.0.1+2"
+git tag release/v1.0.1
+git push origin main
+git push origin release/v1.0.1
+```
+
+Scripted option:
+
+```powershell
+Set-Location "e:/NeuAMP/vk-s-NeuroAmpDSP"
+./app/tool/bump_and_tag.ps1 -Version 1.0.1 -BuildNumber 2 -Push
+```
+
 ## Monitoring
 
 After release:

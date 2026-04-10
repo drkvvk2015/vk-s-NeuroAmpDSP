@@ -61,6 +61,7 @@ class AudioController extends StateNotifier<AsyncValue<DspProfile>> {
   Timer? _adaptiveLoopTimer;
   bool _realtimeDemoRunning = false;
   bool _filePlaybackRunning = false;
+  bool _microphoneMonitorRunning = false;
   int _adaptiveTick = 0;
   DspProfile? _profileBeforeBypass;
   bool _bypassEnabled = false;
@@ -156,6 +157,54 @@ class AudioController extends StateNotifier<AsyncValue<DspProfile>> {
     }
   }
 
+  Future<DspBridgeDiagnostic> runBridgeDiagnostic() async {
+    final initialized = await _nativeAudioBridge.initializeDsp(48000);
+    final version = await _nativeAudioBridge.getDspEngineVersion();
+    final yaw = await _nativeAudioBridge.getHeadTrackingYawDegrees();
+    final playbackStatus = await _nativeAudioBridge.getPlaybackStatus();
+    final dspReady = playbackStatus?['dspReady'] == true;
+    final lastError = playbackStatus?['lastError']?.toString();
+
+    final issues = <String>[];
+    if (!initialized) {
+      issues.add('initializeDsp returned false');
+    }
+    if (version == 'unknown' || version == 'dsp-native-unavailable') {
+      issues.add('DSP version unavailable');
+    }
+    if (!dspReady) {
+      issues.add('Native playback status reports DSP not ready');
+    }
+    if (lastError != null && lastError.isNotEmpty && lastError != 'none' && lastError != 'idle') {
+      issues.add('Native lastError=$lastError');
+    }
+
+    final summary = issues.isEmpty
+        ? 'Bridge OK: initialize/version/status calls succeeded.'
+        : 'Bridge diagnostic found issues: ${issues.join('; ')}';
+
+    _logger.info(
+      'DSP bridge diagnostic completed',
+      data: {
+        'initialized': initialized,
+        'version': version,
+        'yaw': yaw,
+        'dspReady': dspReady,
+        'lastError': lastError,
+        'issues': issues,
+      },
+    );
+
+    return DspBridgeDiagnostic(
+      initialized: initialized,
+      version: version,
+      yawDegrees: yaw,
+      playbackStatus: playbackStatus,
+      issues: issues,
+      summary: summary,
+    );
+  }
+
   /// Sends a synthetic frame through native DSP and returns measurable deltas.
   Future<DspProbeResult> runDspProbe() async {
     const int frameSize = 512;
@@ -216,6 +265,7 @@ class AudioController extends StateNotifier<AsyncValue<DspProfile>> {
     _realtimeDemoRunning = started;
     if (started) {
       _filePlaybackRunning = false;
+      _microphoneMonitorRunning = false;
     }
 
     if (started) {
@@ -252,6 +302,7 @@ class AudioController extends StateNotifier<AsyncValue<DspProfile>> {
     _filePlaybackRunning = started;
     if (started) {
       _realtimeDemoRunning = false;
+      _microphoneMonitorRunning = false;
       if (profile.aiAdaptiveEnabled) {
         _startAdaptiveLoop();
       }
@@ -277,6 +328,53 @@ class AudioController extends StateNotifier<AsyncValue<DspProfile>> {
   Future<bool> isFilePlaybackRunning() async {
     _filePlaybackRunning = await _nativeAudioBridge.isFileDspPlaybackRunning();
     return _filePlaybackRunning;
+  }
+
+  Future<bool> requestRecordAudioPermission() async {
+    return _nativeAudioBridge.requestRecordAudioPermission();
+  }
+
+  Future<bool> hasRecordAudioPermission() async {
+    return _nativeAudioBridge.hasRecordAudioPermission();
+  }
+
+  Future<bool> startMicrophoneMonitor() async {
+    final profile = state.value;
+    if (profile == null) {
+      return false;
+    }
+
+    await _syncConfigToNative(profile);
+    final started = await _nativeAudioBridge.startMicrophoneDspMonitor();
+    _microphoneMonitorRunning = started;
+    if (started) {
+      _realtimeDemoRunning = false;
+      _filePlaybackRunning = false;
+      if (profile.aiAdaptiveEnabled) {
+        _startAdaptiveLoop();
+      }
+      _logger.info('Microphone DSP monitor started');
+    } else {
+      _logger.warning('Microphone DSP monitor failed to start');
+    }
+    return started;
+  }
+
+  Future<bool> stopMicrophoneMonitor() async {
+    final stopped = await _nativeAudioBridge.stopMicrophoneDspMonitor();
+    _microphoneMonitorRunning = !stopped;
+    if (!_isAnyPlaybackRunning) {
+      _stopAdaptiveLoop();
+    }
+    if (stopped) {
+      _logger.info('Microphone DSP monitor stopped');
+    }
+    return stopped;
+  }
+
+  Future<bool> isMicrophoneMonitorRunning() async {
+    _microphoneMonitorRunning = await _nativeAudioBridge.isMicrophoneDspMonitorRunning();
+    return _microphoneMonitorRunning;
   }
 
   Future<bool> setOutputGainDb(double gainDb) async {
@@ -429,11 +527,12 @@ class AudioController extends StateNotifier<AsyncValue<DspProfile>> {
     _stopAdaptiveLoop();
     _nativeAudioBridge.stopRealtimeDspDemo();
     _nativeAudioBridge.stopFileDspPlayback();
+    _nativeAudioBridge.stopMicrophoneDspMonitor();
     _nativeAudioBridge.releaseDsp();
     super.dispose();
   }
 
-  bool get _isAnyPlaybackRunning => _realtimeDemoRunning || _filePlaybackRunning;
+  bool get _isAnyPlaybackRunning => _realtimeDemoRunning || _filePlaybackRunning || _microphoneMonitorRunning;
 
   bool get bypassEnabled => _bypassEnabled;
 
@@ -456,4 +555,24 @@ class DspProbeResult {
   final double? inputRms;
   final double? outputRms;
   final String message;
+}
+
+class DspBridgeDiagnostic {
+  const DspBridgeDiagnostic({
+    required this.initialized,
+    required this.version,
+    required this.yawDegrees,
+    required this.playbackStatus,
+    required this.issues,
+    required this.summary,
+  });
+
+  final bool initialized;
+  final String version;
+  final double? yawDegrees;
+  final Map<String, dynamic>? playbackStatus;
+  final List<String> issues;
+  final String summary;
+
+  bool get isHealthy => issues.isEmpty;
 }

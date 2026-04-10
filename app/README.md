@@ -10,6 +10,10 @@ For full platform architecture and deployment details, see the root [README.md](
 - Adaptive tuning integration (noise/speed heuristics)
 - Head-tracking sync via Android sensor bridge with smoothing
 - Native bridge calls for DSP init/process/release/version
+- Live microphone DSP monitoring path (Android, RECORD_AUDIO permission)
+- Local file playback routed through DSP processing
+- Automatic live mic DSP startup on first launch frame (after permission grant)
+- Native feedback safety attenuation during mic monitoring
 - App Insights startup + unhandled exception telemetry (prod only)
 
 ## Contributor Quickstart
@@ -54,6 +58,16 @@ flutter analyze
 - `releaseDsp`
 - `getHeadTrackingYaw`
 - `getDspEngineVersion`
+- `requestRecordAudioPermission`
+- `hasRecordAudioPermission`
+- `startMicrophoneDspMonitor`
+- `stopMicrophoneDspMonitor`
+- `isMicrophoneDspMonitorRunning`
+
+## Operational Notes
+- Live Mic DSP is the primary real-time validation mode for real-world input.
+- Use headphones for mic monitoring to minimize acoustic feedback.
+- Diagnostics include `safetyAttenuationActive` when protection is reducing output gain.
 
 ## Android Signing (Release)
 

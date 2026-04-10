@@ -85,6 +85,29 @@ void main() {
     expect(ok, isTrue);
   });
 
+  test('requestRecordAudioPermission returns method result', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'requestRecordAudioPermission') {
+        return true;
+      }
+      return null;
+    });
+
+    final ok = await bridge.requestRecordAudioPermission();
+    expect(ok, isTrue);
+  });
+
+  test('startMicrophoneDspMonitor returns false on channel exception', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      throw PlatformException(code: 'error');
+    });
+
+    final ok = await bridge.startMicrophoneDspMonitor();
+    expect(ok, isFalse);
+  });
+
   test('releaseDsp returns false when native returns null', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {

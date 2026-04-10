@@ -54,6 +54,7 @@ class _ProfileViewState extends ConsumerState<_ProfileView> {
   Timer? _statusTimer;
   Map<String, dynamic>? _status;
   double _ampGainDb = 0.0;
+  bool _autoStartAttempted = false;
 
   @override
   void initState() {
@@ -66,12 +67,46 @@ class _ProfileViewState extends ConsumerState<_ProfileView> {
         _status = status;
       });
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _attemptAutoStartMicDsp();
+    });
   }
 
   @override
   void dispose() {
     _statusTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _attemptAutoStartMicDsp() async {
+    if (_autoStartAttempted || !mounted) {
+      return;
+    }
+    _autoStartAttempted = true;
+
+    final controller = ref.read(audioControllerProvider.notifier);
+    final alreadyRunning = await controller.isMicrophoneMonitorRunning();
+    if (alreadyRunning || !mounted) {
+      return;
+    }
+
+    final granted = await controller.hasRecordAudioPermission() ||
+        await controller.requestRecordAudioPermission();
+    if (!mounted || !granted) {
+      return;
+    }
+
+    final started = await controller.startMicrophoneMonitor();
+    if (!mounted || !started) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Live microphone DSP auto-started.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
@@ -182,6 +217,37 @@ class _ProfileViewState extends ConsumerState<_ProfileView> {
               icon: const Icon(Icons.play_arrow),
               label: const Text('Start Live DSP Demo'),
             ),
+            FilledButton.icon(
+              onPressed: () async {
+                final granted = await controller.hasRecordAudioPermission() ||
+                    await controller.requestRecordAudioPermission();
+                if (!context.mounted) return;
+                if (!granted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Microphone permission is required for live input DSP.'),
+                      duration: Duration(seconds: 3),
+                    ),
+                  );
+                  return;
+                }
+
+                final started = await controller.startMicrophoneMonitor();
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      started
+                          ? 'Live microphone DSP started. Headphones are recommended to avoid speaker feedback.'
+                          : 'Failed to start live microphone DSP path.',
+                    ),
+                    duration: const Duration(seconds: 4),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.mic),
+              label: const Text('Start Live Mic DSP'),
+            ),
             FilledButton.tonalIcon(
               onPressed: () async {
                 final stopped = await controller.stopRealtimeDemo();
@@ -199,6 +265,24 @@ class _ProfileViewState extends ConsumerState<_ProfileView> {
               },
               icon: const Icon(Icons.stop),
               label: const Text('Stop Live DSP Demo'),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: () async {
+                final stopped = await controller.stopMicrophoneMonitor();
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      stopped
+                          ? 'Live microphone DSP stopped.'
+                          : 'Live microphone DSP stop request failed.',
+                    ),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.mic_off),
+              label: const Text('Stop Live Mic DSP'),
             ),
             FilledButton.tonalIcon(
               onPressed: () async {
@@ -281,7 +365,7 @@ class _ProfileViewState extends ConsumerState<_ProfileView> {
                 if (!context.mounted) return;
                 final text = status == null
                     ? 'No playback diagnostics available.'
-                    : 'RT=${status['realtimeRunning']} FILE=${status['fileRunning']} DSP=${status['dspReady']}\nlastError=${status['lastError']} gain=${status['outputGainLinear']}';
+                    : 'RT=${status['realtimeRunning']} FILE=${status['fileRunning']} MIC=${status['microphoneRunning']} DSP=${status['dspReady']}\nperm=${status['hasRecordAudioPermission']} safety=${status['safetyAttenuationActive']} lastError=${status['lastError']} gain=${status['outputGainLinear']}';
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(text),
@@ -291,6 +375,31 @@ class _ProfileViewState extends ConsumerState<_ProfileView> {
               },
               icon: const Icon(Icons.bug_report_outlined),
               label: const Text('DSP Diagnostics'),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: () async {
+                final diagnostic = await controller.runBridgeDiagnostic();
+                if (!context.mounted) return;
+
+                final status = diagnostic.playbackStatus;
+                final details = [
+                  diagnostic.summary,
+                  'init=${diagnostic.initialized} version=${diagnostic.version}',
+                  'yaw=${diagnostic.yawDegrees?.toStringAsFixed(2) ?? 'null'}',
+                  if (status != null)
+                    'dspReady=${status['dspReady']} realtime=${status['realtimeRunning']} file=${status['fileRunning']} mic=${status['microphoneRunning']}',
+                  if (status?['lastError'] != null) 'lastError=${status!['lastError']}',
+                ].join('\n');
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(details),
+                    duration: const Duration(seconds: 6),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.memory_outlined),
+              label: const Text('Bridge Self-Test'),
             ),
           ],
         ),

@@ -20,17 +20,17 @@ data class EqBand(
 class DspProcessor {
     companion object {
         private const val MAX_EQ_BANDS = 5
-
-        external fun processAudioFrame(
-            inputSamples: FloatArray,
-            outputSamples: FloatArray,
-            config: ByteArray
-        ): Boolean
-
-        external fun initializeDspEngine(sampleRate: Int): Boolean
-
-        external fun releaseDspEngine(): Boolean
     }
+
+    private external fun processAudioFrame(
+        inputSamples: FloatArray,
+        outputSamples: FloatArray,
+        config: ByteArray
+    ): Boolean
+
+    private external fun initializeDspEngine(sampleRate: Int): Boolean
+
+    private external fun releaseDspEngine(): Boolean
 
     init {
         try {

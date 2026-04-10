@@ -1,3 +1,5 @@
+import 'dart:developer' as dev;
+
 import 'package:flutter/services.dart';
 
 class NativeAudioBridge {
@@ -7,14 +9,33 @@ class NativeAudioBridge {
   static const String _channelName = 'com.neuroamp/dsp';
   final MethodChannel _channel;
 
+  void _logFailure(String operation, Object error, [StackTrace? stackTrace]) {
+    dev.log(
+      'Native bridge call failed: $operation | $error',
+      name: 'NeuroAmp.NativeAudioBridge',
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
+
   Future<double?> getHeadTrackingYawDegrees() async {
-    final value = await _channel.invokeMethod<double>('getHeadTrackingYaw');
-    return value;
+    try {
+      final value = await _channel.invokeMethod<double>('getHeadTrackingYaw');
+      return value;
+    } catch (error, stackTrace) {
+      _logFailure('getHeadTrackingYaw', error, stackTrace);
+      return null;
+    }
   }
 
   Future<String> getDspEngineVersion() async {
-    final value = await _channel.invokeMethod<String>('getDspEngineVersion');
-    return value ?? 'unknown';
+    try {
+      final value = await _channel.invokeMethod<String>('getDspEngineVersion');
+      return value ?? 'unknown';
+    } catch (error, stackTrace) {
+      _logFailure('getDspEngineVersion', error, stackTrace);
+      return 'unknown';
+    }
   }
 
   /// Process an audio frame through native DSP engine.
@@ -32,7 +53,8 @@ class NativeAudioBridge {
       return result
           .map((sample) => (sample as num).toDouble())
           .toList(growable: false);
-    } catch (e) {
+    } catch (error, stackTrace) {
+      _logFailure('processAudioFrame', error, stackTrace);
       return null;
     }
   }
@@ -45,7 +67,8 @@ class NativeAudioBridge {
         {'config': config},
       );
       return result ?? false;
-    } catch (e) {
+    } catch (error, stackTrace) {
+      _logFailure('setDspConfig', error, stackTrace);
       return false;
     }
   }
@@ -58,7 +81,8 @@ class NativeAudioBridge {
         {'sampleRate': sampleRate},
       );
       return result ?? false;
-    } catch (e) {
+    } catch (error, stackTrace) {
+      _logFailure('initializeDsp', error, stackTrace);
       return false;
     }
   }
@@ -68,7 +92,8 @@ class NativeAudioBridge {
     try {
       final result = await _channel.invokeMethod<bool>('releaseDsp');
       return result ?? false;
-    } catch (e) {
+    } catch (error, stackTrace) {
+      _logFailure('releaseDsp', error, stackTrace);
       return false;
     }
   }
@@ -78,7 +103,8 @@ class NativeAudioBridge {
     try {
       final result = await _channel.invokeMethod<bool>('startRealtimeDspDemo');
       return result ?? false;
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _logFailure('startRealtimeDspDemo', error, stackTrace);
       return false;
     }
   }
@@ -88,7 +114,8 @@ class NativeAudioBridge {
     try {
       final result = await _channel.invokeMethod<bool>('stopRealtimeDspDemo');
       return result ?? false;
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _logFailure('stopRealtimeDspDemo', error, stackTrace);
       return false;
     }
   }
@@ -98,7 +125,58 @@ class NativeAudioBridge {
     try {
       final result = await _channel.invokeMethod<bool>('isRealtimeDspDemoRunning');
       return result ?? false;
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _logFailure('isRealtimeDspDemoRunning', error, stackTrace);
+      return false;
+    }
+  }
+
+  Future<bool> requestRecordAudioPermission() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('requestRecordAudioPermission');
+      return result ?? false;
+    } catch (error, stackTrace) {
+      _logFailure('requestRecordAudioPermission', error, stackTrace);
+      return false;
+    }
+  }
+
+  Future<bool> hasRecordAudioPermission() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('hasRecordAudioPermission');
+      return result ?? false;
+    } catch (error, stackTrace) {
+      _logFailure('hasRecordAudioPermission', error, stackTrace);
+      return false;
+    }
+  }
+
+  Future<bool> startMicrophoneDspMonitor() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('startMicrophoneDspMonitor');
+      return result ?? false;
+    } catch (error, stackTrace) {
+      _logFailure('startMicrophoneDspMonitor', error, stackTrace);
+      return false;
+    }
+  }
+
+  Future<bool> stopMicrophoneDspMonitor() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('stopMicrophoneDspMonitor');
+      return result ?? false;
+    } catch (error, stackTrace) {
+      _logFailure('stopMicrophoneDspMonitor', error, stackTrace);
+      return false;
+    }
+  }
+
+  Future<bool> isMicrophoneDspMonitorRunning() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('isMicrophoneDspMonitorRunning');
+      return result ?? false;
+    } catch (error, stackTrace) {
+      _logFailure('isMicrophoneDspMonitorRunning', error, stackTrace);
       return false;
     }
   }
@@ -111,7 +189,8 @@ class NativeAudioBridge {
         {'filePath': filePath},
       );
       return result ?? false;
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _logFailure('startFileDspPlayback', error, stackTrace);
       return false;
     }
   }
@@ -121,7 +200,8 @@ class NativeAudioBridge {
     try {
       final result = await _channel.invokeMethod<bool>('stopFileDspPlayback');
       return result ?? false;
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _logFailure('stopFileDspPlayback', error, stackTrace);
       return false;
     }
   }
@@ -131,7 +211,8 @@ class NativeAudioBridge {
     try {
       final result = await _channel.invokeMethod<bool>('isFileDspPlaybackRunning');
       return result ?? false;
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _logFailure('isFileDspPlaybackRunning', error, stackTrace);
       return false;
     }
   }
@@ -144,7 +225,8 @@ class NativeAudioBridge {
         {'gainDb': gainDb},
       );
       return result ?? false;
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _logFailure('setOutputGainDb', error, stackTrace);
       return false;
     }
   }
@@ -158,7 +240,8 @@ class NativeAudioBridge {
       }
 
       return result.map((key, value) => MapEntry(key.toString(), value));
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _logFailure('getPlaybackStatus', error, stackTrace);
       return null;
     }
   }

@@ -5,16 +5,9 @@ allprojects {
     }
 }
 
-val newBuildDir: Directory =
-    rootProject.layout.buildDirectory
-        .dir("../../build")
-        .get()
-rootProject.layout.buildDirectory.value(newBuildDir)
+// Keep Android outputs under app/build so Flutter tooling can locate APK artifacts.
+rootProject.layout.buildDirectory.value(rootProject.layout.projectDirectory.dir("../build"))
 
-subprojects {
-    val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
-    project.layout.buildDirectory.value(newSubprojectBuildDir)
-}
 subprojects {
     project.evaluationDependsOn(":app")
 }
