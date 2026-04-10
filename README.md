@@ -29,6 +29,12 @@ NeuroAmp DSP is a high-performance mobile audio processing system that combines 
 - Live microphone input -> DSP -> speaker monitoring mode (Android)
 - Local file playback through DSP (WAV/MP3/AAC decode path)
 
+### Multi-Mode DSP Control
+- `Standard` mode for in-app playback and live input DSP
+- `Enhanced` mode for experimental Android audio-effect attachment on supported apps/devices
+- `Pro` mode with Shizuku-assisted capability checks and controls
+- `Root` mode reserved for rooted/system builds
+
 ### Production-Grade Observability
 - App lifecycle telemetry (App Insights)
 - Global error capture (Flutter + Zone)
@@ -164,13 +170,24 @@ Falls back to debug signing if not configured (dev-friendly).
 | `startMicrophoneDspMonitor` | Start live mic->DSP->speaker path |
 | `stopMicrophoneDspMonitor` | Stop live mic DSP path |
 | `isMicrophoneDspMonitorRunning` | Query mic DSP running state |
+| `setDspMode` | Select standard/enhanced/pro/root mode |
+| `getDspMode` | Query active DSP mode |
+| `getDspModeStatus` | Query runtime capability state for enhanced/pro/root paths |
+| `openNotificationAccessSettings` | Open Android notification listener settings |
+| `requestShizukuPermission` | Request Shizuku permission for Pro mode |
 
 ## Runtime Modes
 - Live Mic DSP: Processes microphone input in real-time with current DSP profile.
 - File DSP Playback: Processes selected local audio files through the DSP chain.
 - Realtime Demo DSP: Synthetic source for quick validation and profiling.
 
-Note: Android app sandbox rules do not allow this app to process system-wide audio from other apps without privileged OS-level integration.
+## DSP Product Modes
+- Standard: Processes only audio generated inside NeuroAmp.
+- Enhanced: Attempts Android audio-effect attachment for supported external players.
+- Pro: Enhanced mode plus Shizuku-assisted advanced control.
+- Root: Reserved for rooted/system builds; this repository still uses compatibility-based attachment rather than full audio-stack hooks.
+
+Note: Android app sandbox rules do not allow guaranteed system-wide PCM interception from other apps without privileged OS-level integration. Enhanced and Pro modes are compatibility-based.
 
 ## CI/CD Pipelines
 

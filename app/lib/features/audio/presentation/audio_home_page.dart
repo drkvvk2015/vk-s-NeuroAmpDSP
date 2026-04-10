@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'dart:async';
 
 import '../application/audio_controller.dart';
+import '../domain/dsp_mode.dart';
 import '../domain/dsp_profile.dart';
 
 class AudioHomePage extends ConsumerWidget {
@@ -53,6 +54,7 @@ class _ProfileView extends ConsumerStatefulWidget {
 class _ProfileViewState extends ConsumerState<_ProfileView> {
   Timer? _statusTimer;
   Map<String, dynamic>? _status;
+  DspModeStatus? _modeStatus;
   double _ampGainDb = 0.0;
   bool _autoStartAttempted = false;
 
@@ -62,9 +64,11 @@ class _ProfileViewState extends ConsumerState<_ProfileView> {
     _statusTimer = Timer.periodic(const Duration(milliseconds: 600), (_) async {
       final controller = ref.read(audioControllerProvider.notifier);
       final status = await controller.getPlaybackStatus();
+      final modeStatus = await controller.getDspModeStatus();
       if (!mounted) return;
       setState(() {
         _status = status;
+        _modeStatus = modeStatus;
       });
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -114,6 +118,7 @@ class _ProfileViewState extends ConsumerState<_ProfileView> {
     final profile = widget.profile;
     final controller = ref.read(audioControllerProvider.notifier);
     final dspVersion = ref.watch(dspVersionProvider);
+    final modeStatus = _modeStatus;
     final inputRms = ((_status?['inputRms'] as num?)?.toDouble() ?? 0.0).clamp(0.0, 1.0);
     final outputRms = ((_status?['outputRms'] as num?)?.toDouble() ?? 0.0).clamp(0.0, 1.0);
 
@@ -131,8 +136,108 @@ class _ProfileViewState extends ConsumerState<_ProfileView> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Live DSP demo is available in-app (Android). System-wide processing for other apps is not supported in standard Android sandbox.',
+          profile.dspMode == DspMode.standard
+              ? 'Standard mode processes only audio generated inside NeuroAmp. Use Enhanced mode for experimental external-player attachment on supported devices.'
+              : '${profile.dspMode.label} mode is active. External-player coverage depends on Android audio-effect support and app compatibility.',
           style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 12),
+        Text('DSP Mode', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: DspMode.values.map((mode) {
+            return ChoiceChip(
+              label: Text(mode.label),
+              selected: profile.dspMode == mode,
+              onSelected: (_) async {
+                final result = await controller.setDspMode(mode);
+                if (!context.mounted) return;
+                setState(() {
+                  _modeStatus = result.status;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(result.message),
+                    duration: const Duration(seconds: 4),
+                  ),
+                );
+              },
+            );
+          }).toList(growable: false),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(profile.dspMode.summary),
+                const SizedBox(height: 8),
+                Text(
+                  modeStatus == null
+                      ? 'Loading runtime mode status...'
+                      : 'enhanced=${modeStatus.enhancedModeSupported} notif=${modeStatus.notificationAccessEnabled} shizuku=${modeStatus.shizukuAvailable}/${modeStatus.shizukuPermissionGranted} root=${modeStatus.rootAvailable}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (modeStatus != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'activeApp=${modeStatus.activeMediaPackage.isEmpty ? 'none' : modeStatus.activeMediaPackage} sessions=${modeStatus.externalSessionCount} last=${modeStatus.lastExternalSessionError}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final opened = await controller.openNotificationAccessSettings();
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              opened
+                                  ? 'Opened notification access settings.'
+                                  : 'Could not open notification access settings.',
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.notifications_active_outlined),
+                      label: const Text('Grant Notification Access'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final granted = await controller.requestShizukuPermission();
+                        if (!context.mounted) return;
+                        final refreshed = await controller.getDspModeStatus();
+                        if (!context.mounted) return;
+                        setState(() {
+                          _modeStatus = refreshed;
+                        });
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              granted
+                                  ? 'Shizuku permission granted.'
+                                  : 'Shizuku permission was not granted or Shizuku is unavailable.',
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.security_outlined),
+                      label: const Text('Request Shizuku'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
         const SizedBox(height: 10),
         Text('Presets', style: Theme.of(context).textTheme.titleMedium),

@@ -108,6 +108,36 @@ void main() {
     expect(ok, isFalse);
   });
 
+  test('setDspMode sends mode payload', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'setDspMode');
+      final args = call.arguments as Map<dynamic, dynamic>;
+      expect(args['mode'], 'enhanced');
+      return true;
+    });
+
+    final ok = await bridge.setDspMode('enhanced');
+    expect(ok, isTrue);
+  });
+
+  test('getDspModeStatus maps dynamic keys to strings', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getDspModeStatus') {
+        return {
+          'selectedMode': 'standard',
+          'enhancedModeSupported': true,
+        };
+      }
+      return null;
+    });
+
+    final status = await bridge.getDspModeStatus();
+    expect(status?['selectedMode'], 'standard');
+    expect(status?['enhancedModeSupported'], isTrue);
+  });
+
   test('releaseDsp returns false when native returns null', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {

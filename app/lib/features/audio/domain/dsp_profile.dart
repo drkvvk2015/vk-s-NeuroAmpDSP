@@ -1,10 +1,12 @@
 import 'dart:convert';
 
+import 'dsp_mode.dart';
 import 'eq_band.dart';
 
 class DspProfile {
   const DspProfile({
     required this.name,
+    required this.dspMode,
     required this.eqBands,
     required this.spatialWidth,
     required this.bassBoost,
@@ -17,6 +19,7 @@ class DspProfile {
   factory DspProfile.defaultProfile() {
     return const DspProfile(
       name: 'Reference',
+      dspMode: DspMode.standard,
       eqBands: [
         EqBand(frequencyHz: 60, gainDb: 0, q: 1.0),
         EqBand(frequencyHz: 250, gainDb: 0, q: 1.0),
@@ -34,6 +37,7 @@ class DspProfile {
   }
 
   final String name;
+  final DspMode dspMode;
   final List<EqBand> eqBands;
   final double spatialWidth;
   final double bassBoost;
@@ -44,6 +48,7 @@ class DspProfile {
 
   DspProfile copyWith({
     String? name,
+    DspMode? dspMode,
     List<EqBand>? eqBands,
     double? spatialWidth,
     double? bassBoost,
@@ -54,6 +59,7 @@ class DspProfile {
   }) {
     return DspProfile(
       name: name ?? this.name,
+      dspMode: dspMode ?? this.dspMode,
       eqBands: eqBands ?? this.eqBands,
       spatialWidth: spatialWidth ?? this.spatialWidth,
       bassBoost: bassBoost ?? this.bassBoost,
@@ -67,6 +73,7 @@ class DspProfile {
   Map<String, dynamic> toJson() {
     return {
       'name': name,
+      'dspMode': dspMode.wireName,
       'eqBands': eqBands.map((band) => band.toJson()).toList(),
       'spatialWidth': spatialWidth,
       'bassBoost': bassBoost,
@@ -92,6 +99,7 @@ class DspProfile {
 
     return DspProfile(
       name: json['name'] as String? ?? defaults.name,
+      dspMode: DspModeX.fromWireName(json['dspMode'] as String?),
       eqBands: eqBands,
       spatialWidth:
         (json['spatialWidth'] as num?)?.toDouble() ?? defaults.spatialWidth,

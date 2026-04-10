@@ -6,6 +6,7 @@ import '../../../core/logging/app_logger.dart';
 import '../../../core/platform/native_audio_bridge.dart';
 import '../data/local_profile_repository.dart';
 import '../data/profile_repository.dart';
+import '../domain/dsp_mode.dart';
 import '../domain/dsp_profile.dart';
 import 'adaptive_tuning_service.dart';
 import 'head_tracking_service.dart';
@@ -76,6 +77,7 @@ class AudioController extends StateNotifier<AsyncValue<DspProfile>> {
 
       final profile = await _repository.load();
       state = AsyncValue.data(profile);
+      await _nativeAudioBridge.setDspMode(profile.dspMode.wireName);
       await _syncConfigToNative(profile);
     } catch (error, stackTrace) {
       _logger.error('Failed to initialize audio profile', error: error, stackTrace: stackTrace);
@@ -155,6 +157,48 @@ class AudioController extends StateNotifier<AsyncValue<DspProfile>> {
     if (!success) {
       _logger.warning('Failed to sync profile to native DSP engine');
     }
+  }
+
+  Future<DspModeStatus> getDspModeStatus() async {
+    final rawStatus = await _nativeAudioBridge.getDspModeStatus();
+    return DspModeStatus.fromMap(rawStatus);
+  }
+
+  Future<DspModeChangeResult> setDspMode(DspMode mode) async {
+    final current = state.value;
+    final status = await getDspModeStatus();
+    final capabilityIssue = status.validateFor(mode);
+    if (capabilityIssue != null) {
+      return DspModeChangeResult(success: false, message: capabilityIssue, status: status);
+    }
+
+    final applied = await _nativeAudioBridge.setDspMode(mode.wireName);
+    if (!applied) {
+      return DspModeChangeResult(
+        success: false,
+        message: 'Native runtime rejected ${mode.label} mode.',
+        status: status,
+      );
+    }
+
+    if (current != null && current.dspMode != mode) {
+      await _applyProfile(current.copyWith(dspMode: mode), persist: true);
+    }
+
+    final refreshed = await getDspModeStatus();
+    return DspModeChangeResult(
+      success: true,
+      message: refreshed.messageFor(mode),
+      status: refreshed,
+    );
+  }
+
+  Future<bool> openNotificationAccessSettings() async {
+    return _nativeAudioBridge.openNotificationAccessSettings();
+  }
+
+  Future<bool> requestShizukuPermission() async {
+    return _nativeAudioBridge.requestShizukuPermission();
   }
 
   Future<DspBridgeDiagnostic> runBridgeDiagnostic() async {
@@ -575,4 +619,103 @@ class DspBridgeDiagnostic {
   final String summary;
 
   bool get isHealthy => issues.isEmpty;
+}
+
+class DspModeStatus {
+  const DspModeStatus({
+    required this.selectedMode,
+    required this.enhancedModeSupported,
+    required this.notificationAccessEnabled,
+    required this.externalSessionCount,
+    required this.activeMediaPackage,
+    required this.attachedPackages,
+    required this.shizukuAvailable,
+    required this.shizukuPermissionGranted,
+    required this.rootAvailable,
+    required this.lastExternalSessionError,
+  });
+
+  factory DspModeStatus.fromMap(Map<String, dynamic>? raw) {
+    final rawAttachedPackages = raw?['attachedPackages'];
+    return DspModeStatus(
+      selectedMode: DspModeX.fromWireName(raw?['selectedMode'] as String?),
+      enhancedModeSupported: raw?['enhancedModeSupported'] == true,
+      notificationAccessEnabled: raw?['notificationAccessEnabled'] == true,
+      externalSessionCount: (raw?['externalSessionCount'] as num?)?.toInt() ?? 0,
+      activeMediaPackage: (raw?['activeMediaPackage'] as String?) ?? '',
+      attachedPackages: rawAttachedPackages is List
+          ? rawAttachedPackages.map((entry) => entry.toString()).toList(growable: false)
+          : const [],
+      shizukuAvailable: raw?['shizukuAvailable'] == true,
+      shizukuPermissionGranted: raw?['shizukuPermissionGranted'] == true,
+      rootAvailable: raw?['rootAvailable'] == true,
+      lastExternalSessionError: (raw?['lastExternalSessionError'] as String?) ?? 'idle',
+    );
+  }
+
+  final DspMode selectedMode;
+  final bool enhancedModeSupported;
+  final bool notificationAccessEnabled;
+  final int externalSessionCount;
+  final String activeMediaPackage;
+  final List<String> attachedPackages;
+  final bool shizukuAvailable;
+  final bool shizukuPermissionGranted;
+  final bool rootAvailable;
+  final String lastExternalSessionError;
+
+  String? validateFor(DspMode mode) {
+    switch (mode) {
+      case DspMode.standard:
+        return null;
+      case DspMode.enhanced:
+        if (!enhancedModeSupported) {
+          return 'Enhanced mode is not supported on this device.';
+        }
+        return null;
+      case DspMode.pro:
+        if (!enhancedModeSupported) {
+          return 'Pro mode needs device audio-effect support first.';
+        }
+        if (!shizukuAvailable) {
+          return 'Pro mode requires Shizuku to be running.';
+        }
+        if (!shizukuPermissionGranted) {
+          return 'Grant Shizuku permission before enabling Pro mode.';
+        }
+        return null;
+      case DspMode.root:
+        if (!rootAvailable) {
+          return 'Root mode requires a rooted/system build.';
+        }
+        return null;
+    }
+  }
+
+  String messageFor(DspMode mode) {
+    switch (mode) {
+      case DspMode.standard:
+        return 'Standard mode enabled for in-app DSP only.';
+      case DspMode.enhanced:
+        return notificationAccessEnabled
+            ? 'Enhanced mode enabled. Start playback in a supported audio app to attach effects.'
+            : 'Enhanced mode enabled. Grant notification access to improve active-player detection.';
+      case DspMode.pro:
+        return 'Pro mode enabled with Shizuku-assisted control. External effect coverage still depends on device support.';
+      case DspMode.root:
+        return 'Root mode selected. This build still uses the external-effects compatibility path.';
+    }
+  }
+}
+
+class DspModeChangeResult {
+  const DspModeChangeResult({
+    required this.success,
+    required this.message,
+    required this.status,
+  });
+
+  final bool success;
+  final String message;
+  final DspModeStatus status;
 }

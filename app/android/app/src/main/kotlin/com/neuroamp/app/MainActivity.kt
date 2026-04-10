@@ -1,6 +1,7 @@
 package com.neuroamp.app
 
 import android.Manifest
+import android.content.Intent
 import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.Sensor
@@ -16,11 +17,15 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.neuroamp.app.audio.DspMode
+import com.neuroamp.app.audio.ExternalAudioEffectController
 import com.neuroamp.app.dsp.DspProcessor
 import com.neuroamp.app.dsp.DspConfig
+import rikka.shizuku.Shizuku
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -65,11 +70,15 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     @Volatile
     private var lastOutputRms: Float = 0.0f
     private var pendingPermissionResult: MethodChannel.Result? = null
+    private var pendingShizukuPermissionResult: MethodChannel.Result? = null
+    @Volatile
+    private var currentDspMode: DspMode = DspMode.STANDARD
 
     companion object {
         private const val CHANNEL = "com.neuroamp/dsp"
         private const val TAG = "NeuroAmpMainActivity"
         private const val RECORD_AUDIO_REQUEST_CODE = 1101
+        private const val SHIZUKU_REQUEST_CODE = 1401
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -91,6 +100,18 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             dspProcessor = null
             Log.w(TAG, "Native DSP unavailable", e)
         }
+
+        runCatching {
+            Shizuku.addRequestPermissionResultListener { requestCode: Int, grantResult: Int ->
+                if (requestCode == SHIZUKU_REQUEST_CODE) {
+                    pendingShizukuPermissionResult?.success(grantResult == PackageManager.PERMISSION_GRANTED)
+                    pendingShizukuPermissionResult = null
+                }
+            }
+        }
+
+        ExternalAudioEffectController.setMode(currentDspMode)
+        ExternalAudioEffectController.updateProfile(currentDspConfig, linearToDb(outputGainLinear))
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -127,6 +148,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                             result.success(false)
                         } else {
                             currentDspConfig = configFromMap(config)
+                            ExternalAudioEffectController.updateProfile(currentDspConfig, linearToDb(outputGainLinear))
                             result.success(true)
                         }
                     }
@@ -161,8 +183,28 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     "setOutputGainDb" -> {
                         val gainDb = (call.argument<Number>("gainDb") ?: 0.0).toDouble().toFloat()
                         outputGainLinear = dbToLinear(gainDb.coerceIn(-18.0f, 18.0f))
+                        ExternalAudioEffectController.updateProfile(currentDspConfig, gainDb.coerceIn(-18.0f, 18.0f))
                         result.success(true)
                     }
+                    "setDspMode" -> {
+                        val rawMode = call.argument<String>("mode")
+                        currentDspMode = DspMode.fromWireName(rawMode)
+                        ExternalAudioEffectController.setMode(currentDspMode)
+                        result.success(true)
+                    }
+                    "getDspMode" -> result.success(currentDspMode.wireName)
+                    "getDspModeStatus" -> {
+                        result.success(
+                            ExternalAudioEffectController.getStatus(
+                                context = this,
+                                shizukuAvailable = isShizukuAvailable(),
+                                shizukuPermissionGranted = hasShizukuPermission(),
+                                rootAvailable = isRootAvailable(),
+                            ),
+                        )
+                    }
+                    "openNotificationAccessSettings" -> result.success(openNotificationAccessSettings())
+                    "requestShizukuPermission" -> requestShizukuPermission(result)
                     "getPlaybackStatus" -> {
                         result.success(
                             mapOf(
@@ -213,6 +255,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         stopRealtimeDspDemo()
         stopFileDspPlayback()
         stopMicrophoneDspMonitor()
+        ExternalAudioEffectController.releaseAllSessions()
         super.onDestroy()
     }
 
@@ -1100,6 +1143,59 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         )
     }
 
+    private fun openNotificationAccessSettings(): Boolean {
+        return try {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun requestShizukuPermission(result: MethodChannel.Result) {
+        if (!isShizukuAvailable()) {
+            result.success(false)
+            return
+        }
+        if (hasShizukuPermission()) {
+            result.success(true)
+            return
+        }
+        if (pendingShizukuPermissionResult != null) {
+            result.error("shizuku_permission_in_progress", "A Shizuku permission request is already pending", null)
+            return
+        }
+
+        pendingShizukuPermissionResult = result
+        runCatching {
+            Shizuku.requestPermission(SHIZUKU_REQUEST_CODE)
+        }.onFailure {
+            pendingShizukuPermissionResult = null
+            result.success(false)
+        }
+    }
+
+    private fun isShizukuAvailable(): Boolean {
+        return runCatching { Shizuku.pingBinder() }.getOrDefault(false)
+    }
+
+    private fun hasShizukuPermission(): Boolean {
+        return isShizukuAvailable() && runCatching {
+            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        }.getOrDefault(false)
+    }
+
+    private fun isRootAvailable(): Boolean {
+        return listOf(
+            "/system/bin/su",
+            "/system/xbin/su",
+            "/sbin/su",
+            "/system_ext/bin/su",
+        ).any { path ->
+            runCatching { java.io.File(path).exists() }.getOrDefault(false)
+        }
+    }
+
     private fun parseWavInfo(filePath: String): WavInfo? {
         RandomAccessFile(filePath, "r").use { raf ->
             if (raf.length() < 44) {
@@ -1294,6 +1390,13 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     private fun dbToLinear(gainDb: Float): Float {
         return Math.pow(10.0, (gainDb / 20.0).toDouble()).toFloat()
+    }
+
+    private fun linearToDb(linear: Float): Float {
+        if (linear <= 0.0001f) {
+            return -80.0f
+        }
+        return (20.0 * kotlin.math.log10(linear.toDouble())).toFloat()
     }
 
     init {

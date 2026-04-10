@@ -6,6 +6,7 @@ import 'package:neuroamp_app/features/audio/application/adaptive_tuning_service.
 import 'package:neuroamp_app/features/audio/application/audio_controller.dart';
 import 'package:neuroamp_app/features/audio/application/head_tracking_service.dart';
 import 'package:neuroamp_app/features/audio/data/profile_repository.dart';
+import 'package:neuroamp_app/features/audio/domain/dsp_mode.dart';
 import 'package:neuroamp_app/features/audio/domain/dsp_profile.dart';
 
 class _FakeProfileRepository implements ProfileRepository {
@@ -36,10 +37,24 @@ class _FakeNativeAudioBridge extends NativeAudioBridge {
   int stopFileCalls = 0;
   int startMicrophoneCalls = 0;
   int stopMicrophoneCalls = 0;
+  int setModeCalls = 0;
   Map<String, dynamic>? lastConfig;
   List<double>? processFrameResponse;
+  String currentMode = 'standard';
   String version = 'NeuroAmpDSP-test';
   double? yawDegrees = 4.2;
+  Map<String, dynamic>? modeStatus = const {
+    'selectedMode': 'standard',
+    'enhancedModeSupported': true,
+    'notificationAccessEnabled': false,
+    'externalSessionCount': 0,
+    'activeMediaPackage': '',
+    'attachedPackages': <String>[],
+    'shizukuAvailable': false,
+    'shizukuPermissionGranted': false,
+    'rootAvailable': false,
+    'lastExternalSessionError': 'idle',
+  };
   Map<String, dynamic>? playbackStatus = const {
     'realtimeRunning': false,
     'fileRunning': false,
@@ -84,6 +99,42 @@ class _FakeNativeAudioBridge extends NativeAudioBridge {
   @override
   Future<Map<String, dynamic>?> getPlaybackStatus() async {
     return playbackStatus;
+  }
+
+  @override
+  Future<bool> setDspMode(String mode) async {
+    setModeCalls++;
+    currentMode = mode;
+    modeStatus = {
+      ...?modeStatus,
+      'selectedMode': mode,
+    };
+    return true;
+  }
+
+  @override
+  Future<String> getDspMode() async {
+    return currentMode;
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getDspModeStatus() async {
+    return modeStatus;
+  }
+
+  @override
+  Future<bool> openNotificationAccessSettings() async {
+    return true;
+  }
+
+  @override
+  Future<bool> requestShizukuPermission() async {
+    modeStatus = {
+      ...?modeStatus,
+      'shizukuAvailable': true,
+      'shizukuPermissionGranted': true,
+    };
+    return true;
   }
 
   @override
@@ -290,5 +341,42 @@ void main() {
     expect(diagnostic.issues, contains('DSP version unavailable'));
     expect(diagnostic.issues, contains('Native playback status reports DSP not ready'));
     expect(diagnostic.issues, contains('Native lastError=DSP processor unavailable'));
+  });
+
+  test('setDspMode persists enhanced mode when supported', () async {
+    final repo = _FakeProfileRepository(DspProfile.defaultProfile());
+    final bridge = _FakeNativeAudioBridge();
+    final controller = AudioController(
+      repo,
+      const AdaptiveTuningService(),
+      HeadTrackingService(bridge),
+      bridge,
+      const AppLogger(),
+    );
+
+    await controller.initialize();
+    final result = await controller.setDspMode(DspMode.enhanced);
+
+    expect(result.success, isTrue);
+    expect(bridge.setModeCalls, greaterThanOrEqualTo(1));
+    expect(controller.state.value?.dspMode, DspMode.enhanced);
+  });
+
+  test('setDspMode rejects pro mode without Shizuku permission', () async {
+    final repo = _FakeProfileRepository(DspProfile.defaultProfile());
+    final bridge = _FakeNativeAudioBridge();
+    final controller = AudioController(
+      repo,
+      const AdaptiveTuningService(),
+      HeadTrackingService(bridge),
+      bridge,
+      const AppLogger(),
+    );
+
+    await controller.initialize();
+    final result = await controller.setDspMode(DspMode.pro);
+
+    expect(result.success, isFalse);
+    expect(result.message, contains('Shizuku'));
   });
 }

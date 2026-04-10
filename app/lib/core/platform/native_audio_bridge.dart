@@ -245,4 +245,57 @@ class NativeAudioBridge {
       return null;
     }
   }
+
+  Future<bool> setDspMode(String mode) async {
+    try {
+      final result = await _channel.invokeMethod<bool>('setDspMode', {'mode': mode});
+      return result ?? false;
+    } catch (error, stackTrace) {
+      _logFailure('setDspMode', error, stackTrace);
+      return false;
+    }
+  }
+
+  Future<String> getDspMode() async {
+    try {
+      final result = await _channel.invokeMethod<String>('getDspMode');
+      return result ?? 'standard';
+    } catch (error, stackTrace) {
+      _logFailure('getDspMode', error, stackTrace);
+      return 'standard';
+    }
+  }
+
+  Future<Map<String, dynamic>?> getDspModeStatus() async {
+    try {
+      final result = await _channel.invokeMethod<Map<dynamic, dynamic>>('getDspModeStatus');
+      if (result == null) {
+        return null;
+      }
+      return result.map((key, value) => MapEntry(key.toString(), value));
+    } catch (error, stackTrace) {
+      _logFailure('getDspModeStatus', error, stackTrace);
+      return null;
+    }
+  }
+
+  Future<bool> openNotificationAccessSettings() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('openNotificationAccessSettings');
+      return result ?? false;
+    } catch (error, stackTrace) {
+      _logFailure('openNotificationAccessSettings', error, stackTrace);
+      return false;
+    }
+  }
+
+  Future<bool> requestShizukuPermission() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('requestShizukuPermission');
+      return result ?? false;
+    } catch (error, stackTrace) {
+      _logFailure('requestShizukuPermission', error, stackTrace);
+      return false;
+    }
+  }
 }

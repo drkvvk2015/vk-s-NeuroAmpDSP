@@ -106,5 +106,6 @@ flutter {
 dependencies {
     // Required by Flutter's deferred components classes referenced in release/R8.
     implementation("com.google.android.play:core:1.10.3")
+    implementation("dev.rikka.shizuku:api:13.1.5")
 }
 
